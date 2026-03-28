@@ -1,0 +1,3 @@
+﻿.env
+storage/backups/
+storage/logs/*.log

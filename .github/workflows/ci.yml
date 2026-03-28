@@ -1,0 +1,101 @@
+﻿name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  lint-and-e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        ports:
+          - 3306:3306
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: atendy
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_mysql, mbstring, curl, json
+
+      - name: Install MySQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mysql-client
+
+      - name: Build .env for CI
+        shell: bash
+        run: |
+          cp .env.example .env
+          cat >> .env << 'EOF'
+          APP_ENV=local
+          APP_ENABLE_DEMO_SEED=0
+          DB_HOST=127.0.0.1
+          DB_PORT=3306
+          DB_DATABASE=atendy
+          DB_USERNAME=root
+          DB_PASSWORD=root
+          MYSQLDUMP_PATH=/usr/bin/mysqldump
+          EOF
+
+      - name: Start PHP server
+        shell: bash
+        run: |
+          php -S 127.0.0.1:8080 -t public > /tmp/php-server.log 2>&1 &
+          echo $! > /tmp/php-server.pid
+          sleep 2
+
+      - name: Wait for app
+        shell: bash
+        run: |
+          for i in {1..30}; do
+            if curl -fsS "http://127.0.0.1:8080/index.php?route=health" >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "App did not start in time"
+          cat /tmp/php-server.log || true
+          exit 1
+
+      - name: Lint PHP
+        shell: pwsh
+        run: |
+          ./scripts/lint.ps1 -PhpPath "php" -RootPath "$pwd"
+
+      - name: Run E2E validation
+        shell: pwsh
+        run: |
+          ./scripts/e2e_validate.ps1 -BaseUrl "http://127.0.0.1:8080/index.php" -PhpPath "php" -MysqlPath "mysql" -DbHost "127.0.0.1" -DbPort 3306 -DbName "atendy" -DbUser "root" -DbPassword "root"
+
+      - name: Dump server log on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "==== php-server.log ===="
+          cat /tmp/php-server.log || true
+
+      - name: Stop PHP server
+        if: always()
+        shell: bash
+        run: |
+          if [ -f /tmp/php-server.pid ]; then
+            kill "$(cat /tmp/php-server.pid)" || true
+          fi

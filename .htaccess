@@ -1,0 +1,22 @@
+﻿# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Atendy â€” .htaccess raiz do projeto
+# Bloqueia acesso HTTP direto a qualquer coisa fora de public/
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+Options -Indexes
+
+# Nega acesso a tudo â€” apenas public/ Ã© servido pelo Apache
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Permite acesso somente ao diretÃ³rio public/
+    RewriteCond %{REQUEST_URI} !^/Aula-SQL/public/
+    RewriteRule ^ - [F,L]
+</IfModule>
+
+# Bloqueia diretamente arquivos sensÃ­veis
+<FilesMatch "\.(env|sql|md|log|sh|bat|ps1|phar|lock|json)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
