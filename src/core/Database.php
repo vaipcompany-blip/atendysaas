@@ -36,11 +36,32 @@ final class Database
 
     private static function createConnection(bool $withDatabase): PDO
     {
-        $host = env('DB_HOST', '127.0.0.1');
-        $port = env('DB_PORT', '3306');
-        $name = self::databaseName();
-        $user = env('DB_USERNAME', 'root');
-        $pass = env('DB_PASSWORD', '');
+        $host = self::firstEnv(['DB_HOST', 'MYSQLHOST'], '127.0.0.1');
+        $port = self::firstEnv(['DB_PORT', 'MYSQLPORT'], '3306');
+        $name = self::firstEnv(['DB_DATABASE', 'MYSQLDATABASE'], 'atendy');
+        $user = self::firstEnv(['DB_USERNAME', 'MYSQLUSER'], 'root');
+        $pass = self::firstEnv(['DB_PASSWORD', 'MYSQLPASSWORD'], '');
+
+        // Railway fallback: parse MYSQL_PUBLIC_URL / DATABASE_URL if explicit vars are absent.
+        if ($host === '127.0.0.1' || $name === 'atendy') {
+            $url = self::firstEnv(['MYSQL_PUBLIC_URL', 'DATABASE_URL'], '');
+            if ($url !== '') {
+                $parts = parse_url($url);
+                if (is_array($parts)) {
+                    $host = (string) ($parts['host'] ?? $host);
+                    $port = isset($parts['port']) ? (string) $parts['port'] : $port;
+                    $user = isset($parts['user']) ? urldecode((string) $parts['user']) : $user;
+                    $pass = isset($parts['pass']) ? urldecode((string) $parts['pass']) : $pass;
+                    $path = (string) ($parts['path'] ?? '');
+                    if ($path !== '') {
+                        $parsedName = ltrim($path, '/');
+                        if ($parsedName !== '') {
+                            $name = $parsedName;
+                        }
+                    }
+                }
+            }
+        }
 
         $dsn = $withDatabase
             ? sprintf('mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4', $host, $port, $name)
@@ -50,6 +71,18 @@ final class Database
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ]);
+    }
+
+    private static function firstEnv(array $keys, string $default): string
+    {
+        foreach ($keys as $key) {
+            $value = trim((string) env($key, ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return $default;
     }
 }
 
