@@ -298,6 +298,7 @@ class TeamController
         return (time() - $createdAt) > ($this->inviteLifetimeHours() * 3600);
     }
 }
-?>
+
+
 
 
