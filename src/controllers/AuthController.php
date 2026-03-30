@@ -78,21 +78,21 @@ final class AuthController
             redirect(base_url('route=register&error=' . urlencode('Você precisa aceitar os Termos de Uso e a Política de Privacidade.')));
         }
 
-        $db = Database::connection();
-
-        $exists = $db->prepare('SELECT id FROM users WHERE email = :email OR cpf = :cpf LIMIT 1');
-        $exists->execute([
-            'email' => $email,
-            'cpf' => $cpf,
-        ]);
-        if ($exists->fetch()) {
-            redirect(base_url('route=register&error=' . urlencode('Já existe uma conta com este e-mail ou CPF.')));
-        }
-
-        $hash = password_hash($password, PASSWORD_DEFAULT);
-
-        $db->beginTransaction();
         try {
+            $db = Database::connection();
+
+            $exists = $db->prepare('SELECT id FROM users WHERE email = :email OR cpf = :cpf LIMIT 1');
+            $exists->execute([
+                'email' => $email,
+                'cpf' => $cpf,
+            ]);
+            if ($exists->fetch()) {
+                redirect(base_url('route=register&error=' . urlencode('Já existe uma conta com este e-mail ou CPF.')));
+            }
+
+            $hash = password_hash($password, PASSWORD_DEFAULT);
+
+            $db->beginTransaction();
             $insertUser = $db->prepare(
                 'INSERT INTO users (email, cpf, password_hash, nome_consultorio, telefone, endereco, ativo, created_at, updated_at)
                  VALUES (:email, :cpf, :password_hash, :nome_consultorio, :telefone, :endereco, 1, NOW(), NOW())'
@@ -143,10 +143,10 @@ final class AuthController
 
             $db->commit();
         } catch (Throwable $e) {
-            if ($db->inTransaction()) {
+            if (isset($db) && $db instanceof PDO && $db->inTransaction()) {
                 $db->rollBack();
             }
-            redirect(base_url('route=register&error=' . urlencode('Não foi possível criar a conta agora.')));
+            redirect(base_url('route=register&error=' . urlencode('Não foi possível criar a conta agora. Tente novamente em instantes.')));
         }
 
         redirect(base_url('route=login&error=' . urlencode('Conta criada com sucesso! Faça login.')));
@@ -166,24 +166,28 @@ final class AuthController
             redirect(base_url('route=login&error=Informe login e senha'));
         }
 
-        $blockInfo = $this->rateLimitStatus($login, $ipAddress);
-        if (($blockInfo['blocked'] ?? false) === true) {
-            $minutes = (int) ($blockInfo['minutes_left'] ?? self::LOGIN_WINDOW_MINUTES);
-            $this->logSecurityEventByLogin($login, 'login_blocked_rate_limit', $ipAddress, 'Bloqueado por excesso de tentativas.');
-            redirect(base_url('route=login&error=' . urlencode('Muitas tentativas. Tente novamente em ' . $minutes . ' minuto(s).')));
+        try {
+            $blockInfo = $this->rateLimitStatus($login, $ipAddress);
+            if (($blockInfo['blocked'] ?? false) === true) {
+                $minutes = (int) ($blockInfo['minutes_left'] ?? self::LOGIN_WINDOW_MINUTES);
+                $this->logSecurityEventByLogin($login, 'login_blocked_rate_limit', $ipAddress, 'Bloqueado por excesso de tentativas.');
+                redirect(base_url('route=login&error=' . urlencode('Muitas tentativas. Tente novamente em ' . $minutes . ' minuto(s).')));
+            }
+
+            if (!Auth::attempt($login, $password)) {
+                $this->registerLoginAttempt($login, $ipAddress, false);
+                $this->logSecurityEventByLogin($login, 'login_failed', $ipAddress, 'Credenciais inválidas.');
+                redirect(base_url('route=login&error=Credenciais inválidas'));
+            }
+
+            $this->registerLoginAttempt($login, $ipAddress, true);
+            $this->clearFailedAttempts($login, $ipAddress);
+            $this->logSecurityEventByLogin($login, 'login_success', $ipAddress, 'Login efetuado com sucesso.');
+
+            redirect(base_url('route=dashboard'));
+        } catch (Throwable $e) {
+            redirect(base_url('route=login&error=' . urlencode('Serviço indisponível no momento. Tente novamente em 1 minuto.')));
         }
-
-        if (!Auth::attempt($login, $password)) {
-            $this->registerLoginAttempt($login, $ipAddress, false);
-            $this->logSecurityEventByLogin($login, 'login_failed', $ipAddress, 'Credenciais inválidas.');
-            redirect(base_url('route=login&error=Credenciais inválidas'));
-        }
-
-        $this->registerLoginAttempt($login, $ipAddress, true);
-        $this->clearFailedAttempts($login, $ipAddress);
-        $this->logSecurityEventByLogin($login, 'login_success', $ipAddress, 'Login efetuado com sucesso.');
-
-        redirect(base_url('route=dashboard'));
     }
 
     public function logout(): void
