@@ -18,7 +18,7 @@ ServerSignature Off
 # â”€â”€ Front controller â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    RewriteBase /Aula-SQL/public/
+    RewriteBase /
 
     # Deixa passar arquivos e diretÃ³rios reais (css, js, imagens etc.)
     RewriteCond %{REQUEST_FILENAME} !-f
