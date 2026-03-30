@@ -486,87 +486,104 @@ final class AuthController
 
     private function registerLoginAttempt(string $login, string $ipAddress, bool $success): void
     {
-        $stmt = Database::connection()->prepare(
-            'INSERT INTO login_attempts (login_identifier, ip_address, success, attempted_at)
-             VALUES (:login_identifier, :ip_address, :success, NOW())'
-        );
-        $stmt->execute([
-            'login_identifier' => mb_strtolower($login, 'UTF-8'),
-            'ip_address' => $ipAddress,
-            'success' => $success ? 1 : 0,
-        ]);
+        try {
+            $stmt = Database::connection()->prepare(
+                'INSERT INTO login_attempts (login_identifier, ip_address, success, attempted_at)
+                 VALUES (:login_identifier, :ip_address, :success, NOW())'
+            );
+            $stmt->execute([
+                'login_identifier' => mb_strtolower($login, 'UTF-8'),
+                'ip_address' => $ipAddress,
+                'success' => $success ? 1 : 0,
+            ]);
 
-        $cleanup = Database::connection()->prepare(
-            'DELETE FROM login_attempts WHERE attempted_at < DATE_SUB(NOW(), INTERVAL 2 DAY)'
-        );
-        $cleanup->execute();
+            $cleanup = Database::connection()->prepare(
+                'DELETE FROM login_attempts WHERE attempted_at < DATE_SUB(NOW(), INTERVAL 2 DAY)'
+            );
+            $cleanup->execute();
+        } catch (Throwable $e) {
+            // Non-critical telemetry must not block login.
+        }
     }
 
     private function clearFailedAttempts(string $login, string $ipAddress): void
     {
-        $stmt = Database::connection()->prepare(
-            'DELETE FROM login_attempts
-             WHERE login_identifier = :login_identifier
-               AND ip_address = :ip_address
-               AND success = 0'
-        );
-        $stmt->execute([
-            'login_identifier' => mb_strtolower($login, 'UTF-8'),
-            'ip_address' => $ipAddress,
-        ]);
+        try {
+            $stmt = Database::connection()->prepare(
+                'DELETE FROM login_attempts
+                 WHERE login_identifier = :login_identifier
+                   AND ip_address = :ip_address
+                   AND success = 0'
+            );
+            $stmt->execute([
+                'login_identifier' => mb_strtolower($login, 'UTF-8'),
+                'ip_address' => $ipAddress,
+            ]);
+        } catch (Throwable $e) {
+            // Non-critical telemetry must not block login.
+        }
     }
 
     private function rateLimitStatus(string $login, string $ipAddress): array
     {
-        $stmt = Database::connection()->prepare(
-            'SELECT COUNT(*) AS total,
-                                        TIMESTAMPDIFF(SECOND, NOW(), DATE_ADD(MIN(attempted_at), INTERVAL 15 MINUTE)) AS seconds_left
-             FROM login_attempts
-             WHERE login_identifier = :login_identifier
-               AND ip_address = :ip_address
-               AND success = 0
-             AND attempted_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)'
-        );
-        $stmt->bindValue('login_identifier', mb_strtolower($login, 'UTF-8'), PDO::PARAM_STR);
-        $stmt->bindValue('ip_address', $ipAddress, PDO::PARAM_STR);
-        $stmt->execute();
+        try {
+            $stmt = Database::connection()->prepare(
+                'SELECT COUNT(*) AS total,
+                                            TIMESTAMPDIFF(SECOND, NOW(), DATE_ADD(MIN(attempted_at), INTERVAL 15 MINUTE)) AS seconds_left
+                 FROM login_attempts
+                 WHERE login_identifier = :login_identifier
+                   AND ip_address = :ip_address
+                   AND success = 0
+                 AND attempted_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)'
+            );
+            $stmt->bindValue('login_identifier', mb_strtolower($login, 'UTF-8'), PDO::PARAM_STR);
+            $stmt->bindValue('ip_address', $ipAddress, PDO::PARAM_STR);
+            $stmt->execute();
 
-        $row = $stmt->fetch() ?: ['total' => 0, 'seconds_left' => 0];
-        $total = (int) ($row['total'] ?? 0);
+            $row = $stmt->fetch() ?: ['total' => 0, 'seconds_left' => 0];
+            $total = (int) ($row['total'] ?? 0);
 
-        if ($total < self::LOGIN_MAX_ATTEMPTS) {
+            if ($total < self::LOGIN_MAX_ATTEMPTS) {
+                return ['blocked' => false, 'minutes_left' => 0];
+            }
+
+            $secondsLeft = (int) ($row['seconds_left'] ?? 0);
+            if ($secondsLeft <= 0) {
+                return ['blocked' => false, 'minutes_left' => 0];
+            }
+
+            $minutesLeft = (int) ceil($secondsLeft / 60);
+
+            return ['blocked' => true, 'minutes_left' => $minutesLeft];
+        } catch (Throwable $e) {
+            // If rate-limit tables are not available yet, allow login flow.
             return ['blocked' => false, 'minutes_left' => 0];
         }
-
-        $secondsLeft = (int) ($row['seconds_left'] ?? 0);
-        if ($secondsLeft <= 0) {
-            return ['blocked' => false, 'minutes_left' => 0];
-        }
-
-        $minutesLeft = (int) ceil($secondsLeft / 60);
-
-        return ['blocked' => true, 'minutes_left' => $minutesLeft];
     }
 
     private function logSecurityEventByLogin(string $login, string $eventType, string $ipAddress, string $details): void
     {
-        $db = Database::connection();
+        try {
+            $db = Database::connection();
 
-        $stmtUser = $db->prepare('SELECT id FROM users WHERE email = :login OR cpf = :login LIMIT 1');
-        $stmtUser->execute(['login' => $login]);
-        $userRow = $stmtUser->fetch();
-        $userId = $userRow ? (int) $userRow['id'] : null;
+            $stmtUser = $db->prepare('SELECT id FROM users WHERE email = :login OR cpf = :login LIMIT 1');
+            $stmtUser->execute(['login' => $login]);
+            $userRow = $stmtUser->fetch();
+            $userId = $userRow ? (int) $userRow['id'] : null;
 
-        $stmt = $db->prepare(
-            'INSERT INTO security_events (user_id, event_type, ip_address, details, created_at)
-             VALUES (:user_id, :event_type, :ip_address, :details, NOW())'
-        );
-        $stmt->execute([
-            'user_id' => $userId,
-            'event_type' => $eventType,
-            'ip_address' => $ipAddress,
-            'details' => $details,
-        ]);
+            $stmt = $db->prepare(
+                'INSERT INTO security_events (user_id, event_type, ip_address, details, created_at)
+                 VALUES (:user_id, :event_type, :ip_address, :details, NOW())'
+            );
+            $stmt->execute([
+                'user_id' => $userId,
+                'event_type' => $eventType,
+                'ip_address' => $ipAddress,
+                'details' => $details,
+            ]);
+        } catch (Throwable $e) {
+            // Non-critical telemetry must not block login.
+        }
     }
 }
 
