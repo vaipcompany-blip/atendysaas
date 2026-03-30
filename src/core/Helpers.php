@@ -4,7 +4,16 @@ declare(strict_types=1);
 
 function env(string $key, ?string $default = null): ?string
 {
-    return $_ENV[$key] ?? $default;
+    if (array_key_exists($key, $_ENV) && $_ENV[$key] !== null && $_ENV[$key] !== '') {
+        return (string) $_ENV[$key];
+    }
+
+    $value = getenv($key);
+    if ($value === false || $value === '') {
+        return $default;
+    }
+
+    return (string) $value;
 }
 
 function env_bool(string $key, bool $default = false): bool

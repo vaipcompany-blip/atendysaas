@@ -3,6 +3,8 @@ FROM php:8.2-fpm
 # Install nginx and PHP extensions
 RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*
 RUN docker-php-ext-install pdo pdo_mysql
+# Keep Railway environment variables visible inside PHP-FPM workers.
+RUN sed -ri 's/^;?clear_env\s*=\s*.*/clear_env = no/' /usr/local/etc/php-fpm.d/www.conf
 
 # nginx site config
 COPY docker/nginx.conf /etc/nginx/sites-available/default
