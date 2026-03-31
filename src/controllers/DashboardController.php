@@ -16,9 +16,11 @@ final class DashboardController
 
     public function index(): void
     {
-        $user   = Auth::user();
-        $userId = (int) $user['id'];
-        $db     = Database::connection();
+        $user = Auth::user();
+        $userId = (int) ($user['id'] ?? 0);
+
+        try {
+            $db = Database::connection();
 
         // �"?�"? Período selecionado �"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?
         $period = (string) ($_GET['period'] ?? '30d');
@@ -111,6 +113,16 @@ final class DashboardController
             'monthlyConversionGoal'=> $monthlyConversionGoal,
             'upcomingAppointments' => $upcomingAppointments,
         ]);
+        } catch (Throwable $e) {
+            AppLogger::error('Dashboard load failed', [
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            redirect(base_url('route=patients&message=' . urlencode('Painel temporariamente indisponivel.')));
+        }
     }
 
     // �"?�"? Helpers privados �"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?

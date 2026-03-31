@@ -9,11 +9,13 @@ final class AuthController
 
     public function showLogin(): void
     {
-        if (Auth::check()) {
+        $error = $_GET['error'] ?? ($_SESSION['auth_error'] ?? null);
+        $forceLoginView = isset($_GET['force_login']);
+
+        if (Auth::check() && $error === null && !$forceLoginView) {
             redirect(base_url('route=dashboard'));
         }
 
-        $error = $_GET['error'] ?? ($_SESSION['auth_error'] ?? null);
         unset($_SESSION['auth_error']);
         View::render('auth/login', ['error' => $error]);
     }

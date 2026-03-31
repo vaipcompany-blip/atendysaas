@@ -350,10 +350,6 @@ switch ($route) {
         'line' => $e->getLine(),
     ]);
 
-    if (!headers_sent()) {
-        redirect(base_url('route=login&error=' . urlencode('Falha interna temporaria. Tente novamente.')));
-    }
-
     http_response_code(500);
     echo 'Erro interno do servidor.';
 }
