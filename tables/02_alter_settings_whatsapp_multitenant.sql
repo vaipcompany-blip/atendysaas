@@ -1,5 +1,3 @@
-﻿USE atendy;
-
 ALTER TABLE settings
     ADD COLUMN IF NOT EXISTS whatsapp_mode VARCHAR(20) NOT NULL DEFAULT 'mock' AFTER mensagem_confirmacao,
     ADD COLUMN IF NOT EXISTS whatsapp_api_url VARCHAR(255) NULL AFTER whatsapp_mode,

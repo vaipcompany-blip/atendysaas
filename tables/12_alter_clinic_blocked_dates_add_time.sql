@@ -1,8 +1,5 @@
-Ôªø-- Migration 12: adicionar faixa de hor√°rio em bloqueios da cl√≠nica
+-- Migration 12: adicionar faixa de hor·rio em bloqueios da clÌnica
 -- Permite bloquear apenas parte do dia (ex: 14:00-15:30)
-
-USE atendy;
-
 ALTER TABLE clinic_blocked_dates
     ADD COLUMN IF NOT EXISTS start_time TIME NULL AFTER blocked_date,
     ADD COLUMN IF NOT EXISTS end_time TIME NULL AFTER start_time;

@@ -1,3 +1,1 @@
-﻿CREATE DATABASE IF NOT EXISTS atendy CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE atendy;
-
+CREATE DATABASE IF NOT EXISTS atendy CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

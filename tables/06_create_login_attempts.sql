@@ -1,6 +1,4 @@
-﻿-- Migration 06: controle de tentativas de login (rate limit)
-USE atendy;
-
+-- Migration 06: controle de tentativas de login (rate limit)
 CREATE TABLE IF NOT EXISTS login_attempts (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     login_identifier VARCHAR(180) NOT NULL,

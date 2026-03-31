@@ -1,6 +1,4 @@
-Ôªø-- Migration 07: controle de invalida√ß√£o global de sess√µes por usu√°rio
-USE atendy;
-
+-- Migration 07: controle de invalidaÁ„o global de sessıes por usu·rio
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS session_version INT UNSIGNED NOT NULL DEFAULT 1 AFTER ativo;
 

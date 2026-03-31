@@ -1,6 +1,4 @@
-Ôªø-- Migration 08: eventos de seguran√ßa por usu√°rio
-USE atendy;
-
+-- Migration 08: eventos de seguranÁa por usu·rio
 CREATE TABLE IF NOT EXISTS security_events (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id INT UNSIGNED NULL,
