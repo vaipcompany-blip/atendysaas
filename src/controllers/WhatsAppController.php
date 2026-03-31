@@ -642,64 +642,75 @@ final class WhatsAppController
 
     private function ensureWhatsAppInfrastructure(PDO $db): void
     {
-        $db->exec(
-            'CREATE TABLE IF NOT EXISTS whatsapp_messages (
-                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                user_id INT UNSIGNED NOT NULL,
-                patient_id INT UNSIGNED NULL,
-                appointment_id INT UNSIGNED NULL,
-                direction VARCHAR(20) NOT NULL,
-                texto TEXT NOT NULL,
-                status VARCHAR(30) NOT NULL DEFAULT "sent",
-                external_message_id VARCHAR(100) NULL,
-                timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                KEY idx_messages_user (user_id),
-                KEY idx_messages_patient (patient_id),
-                KEY idx_messages_appointment (appointment_id),
-                KEY idx_messages_ext (external_message_id)
-            ) ENGINE=InnoDB'
-        );
+        $definitions = [
+            'whatsapp_messages' =>
+                'CREATE TABLE IF NOT EXISTS whatsapp_messages (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    patient_id INT UNSIGNED NULL,
+                    appointment_id INT UNSIGNED NULL,
+                    direction VARCHAR(20) NOT NULL,
+                    texto TEXT NOT NULL,
+                    status VARCHAR(30) NOT NULL DEFAULT "sent",
+                    external_message_id VARCHAR(100) NULL,
+                    timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    KEY idx_messages_user (user_id),
+                    KEY idx_messages_patient (patient_id),
+                    KEY idx_messages_appointment (appointment_id),
+                    KEY idx_messages_ext (external_message_id)
+                ) ENGINE=InnoDB',
+            'automation_logs' =>
+                'CREATE TABLE IF NOT EXISTS automation_logs (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    appointment_id INT UNSIGNED NULL,
+                    tipo_automacao VARCHAR(50) NOT NULL,
+                    status_envio VARCHAR(30) NOT NULL,
+                    detalhes VARCHAR(255) NULL,
+                    timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    KEY idx_automation_user (user_id),
+                    KEY idx_automation_appointment (appointment_id)
+                ) ENGINE=InnoDB',
+            'whatsapp_auto_replies' =>
+                'CREATE TABLE IF NOT EXISTS whatsapp_auto_replies (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    keyword VARCHAR(100) NOT NULL,
+                    reply TEXT NOT NULL,
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    sort_order INT NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NULL,
+                    KEY idx_auto_replies_user (user_id, is_active)
+                ) ENGINE=InnoDB',
+            'whatsapp_conversation_state' =>
+                'CREATE TABLE IF NOT EXISTS whatsapp_conversation_state (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    patient_id INT UNSIGNED NOT NULL,
+                    state VARCHAR(40) NOT NULL,
+                    payload TEXT NULL,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_conversation_state (user_id, patient_id),
+                    KEY idx_conversation_user (user_id)
+                ) ENGINE=InnoDB',
+        ];
 
-        $db->exec(
-            'CREATE TABLE IF NOT EXISTS automation_logs (
-                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                user_id INT UNSIGNED NOT NULL,
-                appointment_id INT UNSIGNED NULL,
-                tipo_automacao VARCHAR(50) NOT NULL,
-                status_envio VARCHAR(30) NOT NULL,
-                detalhes VARCHAR(255) NULL,
-                timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                KEY idx_automation_user (user_id),
-                KEY idx_automation_appointment (appointment_id)
-            ) ENGINE=InnoDB'
-        );
+        foreach ($definitions as $table => $sql) {
+            if ($this->tableExists($db, $table)) {
+                continue;
+            }
 
-        $db->exec(
-            'CREATE TABLE IF NOT EXISTS whatsapp_auto_replies (
-                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                user_id INT UNSIGNED NOT NULL,
-                keyword VARCHAR(100) NOT NULL,
-                reply TEXT NOT NULL,
-                is_active TINYINT(1) NOT NULL DEFAULT 1,
-                sort_order INT NOT NULL DEFAULT 0,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME NULL,
-                KEY idx_auto_replies_user (user_id, is_active)
-            ) ENGINE=InnoDB'
-        );
-
-        $db->exec(
-            'CREATE TABLE IF NOT EXISTS whatsapp_conversation_state (
-                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                user_id INT UNSIGNED NOT NULL,
-                patient_id INT UNSIGNED NOT NULL,
-                state VARCHAR(40) NOT NULL,
-                payload TEXT NULL,
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                UNIQUE KEY uniq_conversation_state (user_id, patient_id),
-                KEY idx_conversation_user (user_id)
-            ) ENGINE=InnoDB'
-        );
+            try {
+                $db->exec($sql);
+            } catch (Throwable $e) {
+                // DDL failure (e.g., permission denied) must not make the module unavailable.
+                AppLogger::error('WhatsApp infrastructure ensure failed', [
+                    'table' => $table,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 }
 
