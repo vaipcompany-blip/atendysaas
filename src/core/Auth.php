@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 final class Auth
 {
+    private static ?array $usersColumnsCache = null;
+
     public static function check(): bool
     {
         $user = $_SESSION['user'] ?? null;
@@ -51,7 +53,16 @@ final class Auth
         $userId = (int) $user['id'];
         $sessionVersion = (int) ($user['session_version'] ?? 0);
 
-        $stmt = Database::connection()->prepare('SELECT session_version FROM users WHERE id = :id AND ativo = 1 LIMIT 1');
+        $hasAtivo = self::userHasColumn('ativo');
+        $hasSessionVersion = self::userHasColumn('session_version');
+
+        $sql = 'SELECT ' . ($hasSessionVersion ? 'session_version' : '0 AS session_version') . ' FROM users WHERE id = :id';
+        if ($hasAtivo) {
+            $sql .= ' AND ativo = 1';
+        }
+        $sql .= ' LIMIT 1';
+
+        $stmt = Database::connection()->prepare($sql);
         $stmt->execute(['id' => $userId]);
         $row = $stmt->fetch();
 
@@ -60,8 +71,8 @@ final class Auth
             return false;
         }
 
-        $currentVersion = (int) ($row['session_version'] ?? 0);
-        if ($sessionVersion !== $currentVersion) {
+        $currentVersion = (int) ($row['session_version'] ?? $sessionVersion);
+        if ($hasSessionVersion && $sessionVersion !== $currentVersion) {
             self::invalidateSession();
             return false;
         }
@@ -79,7 +90,25 @@ final class Auth
     {
         $normalizedLogin = mb_strtolower(trim($login), 'UTF-8');
 
-        $sql = 'SELECT id, nome_consultorio, email, cpf, password_hash, session_version FROM users WHERE ativo = 1 AND (email = :login OR cpf = :login) LIMIT 1';
+        $hasAtivo = self::userHasColumn('ativo');
+        $hasCpf = self::userHasColumn('cpf');
+        $hasSessionVersion = self::userHasColumn('session_version');
+
+        $sql = 'SELECT id, nome_consultorio, email, ' .
+            ($hasCpf ? 'cpf' : 'NULL AS cpf') . ', password_hash, ' .
+            ($hasSessionVersion ? 'session_version' : '0 AS session_version') .
+            ' FROM users WHERE ';
+
+        if ($hasAtivo) {
+            $sql .= 'ativo = 1 AND ';
+        }
+
+        $sql .= '(email = :login';
+        if ($hasCpf) {
+            $sql .= ' OR cpf = :login';
+        }
+        $sql .= ') LIMIT 1';
+
         $stmt = Database::connection()->prepare($sql);
         $stmt->execute(['login' => $normalizedLogin]);
         $user = $stmt->fetch();
@@ -215,6 +244,36 @@ final class Auth
         }
 
         return $enabled;
+    }
+
+    private static function userHasColumn(string $column): bool
+    {
+        $columns = self::usersColumns();
+        return in_array($column, $columns, true);
+    }
+
+    private static function usersColumns(): array
+    {
+        if (is_array(self::$usersColumnsCache)) {
+            return self::$usersColumnsCache;
+        }
+
+        try {
+            $stmt = Database::connection()->query('SHOW COLUMNS FROM users');
+            $columns = [];
+            foreach ($stmt->fetchAll() as $row) {
+                $field = (string) ($row['Field'] ?? '');
+                if ($field !== '') {
+                    $columns[] = $field;
+                }
+            }
+
+            self::$usersColumnsCache = $columns;
+            return $columns;
+        } catch (Throwable $e) {
+            self::$usersColumnsCache = [];
+            return [];
+        }
     }
 }
 
