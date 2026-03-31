@@ -114,12 +114,12 @@ final class AuthController
                 'INSERT INTO settings (
                     user_id, horario_abertura, horario_fechamento, duracao_consulta, intervalo,
                     mensagem_confirmacao, whatsapp_mode, whatsapp_api_url, whatsapp_verify_token, whatsapp_default_country,
-                    template_lembrete_12h, template_lembrete_2h, template_followup_falta, template_followup_cancelamento, template_followup_inatividade,
+                    meta_conversao_mensal,
                     created_at, updated_at
                  ) VALUES (
                     :user_id, "08:00:00", "18:00:00", 60, 10,
                     :mensagem_confirmacao, "cloud", "https://graph.facebook.com/v20.0", :whatsapp_verify_token, "55",
-                    :template_lembrete_12h, :template_lembrete_2h, :template_followup_falta, :template_followup_cancelamento, :template_followup_inatividade,
+                    60.00,
                     NOW(), NOW()
                  )'
             );
@@ -127,21 +127,47 @@ final class AuthController
                 'user_id' => $userId,
                 'mensagem_confirmacao' => 'Olá {{nome}}! Sua consulta será em {{data_hora}}. Responda SIM para confirmar.',
                 'whatsapp_verify_token' => $verifyToken,
-                'template_lembrete_12h' => 'Olá {{nome}}! Lembrete: sua consulta é em cerca de 12 horas. Data: {{data_hora}}',
-                'template_lembrete_2h' => 'Olá {{nome}}! Lembrete: sua consulta é em cerca de 2 horas. Data: {{data_hora}}',
-                'template_followup_falta' => 'Oi {{nome}}! Sentimos sua falta na consulta. Quer reagendar?',
-                'template_followup_cancelamento' => 'Olá {{nome}}! Podemos te ajudar a remarcar sua consulta?',
-                'template_followup_inatividade' => 'Oi {{nome}}! Faz um tempo que você não agenda consulta. Quer ver horários disponíveis?',
             ]);
 
-            (new BillingService())->ensureWorkspaceSubscription($userId);
-            (new LegalService())->registerConsent(
-                $userId,
-                (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
-                (string) ($_SERVER['HTTP_USER_AGENT'] ?? '')
-            );
+            // Optional columns from later migrations: apply only if available.
+            try {
+                $db->prepare(
+                    'UPDATE settings
+                     SET template_lembrete_12h = :t12,
+                         template_lembrete_2h = :t2,
+                         template_followup_falta = :tf,
+                         template_followup_cancelamento = :tc,
+                         template_followup_inatividade = :ti,
+                         updated_at = NOW()
+                     WHERE user_id = :user_id'
+                )->execute([
+                    'user_id' => $userId,
+                    't12' => 'Olá {{nome}}! Lembrete: sua consulta é em cerca de 12 horas. Data: {{data_hora}}',
+                    't2' => 'Olá {{nome}}! Lembrete: sua consulta é em cerca de 2 horas. Data: {{data_hora}}',
+                    'tf' => 'Oi {{nome}}! Sentimos sua falta na consulta. Quer reagendar?',
+                    'tc' => 'Olá {{nome}}! Podemos te ajudar a remarcar sua consulta?',
+                    'ti' => 'Oi {{nome}}! Faz um tempo que você não agenda consulta. Quer ver horários disponíveis?',
+                ]);
+            } catch (Throwable $e) {
+                // Ignore when template columns are not present yet.
+            }
 
             $db->commit();
+
+            // Optional modules must not block account creation.
+            try {
+                (new BillingService())->ensureWorkspaceSubscription($userId);
+            } catch (Throwable $e) {
+            }
+
+            try {
+                (new LegalService())->registerConsent(
+                    $userId,
+                    (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
+                    (string) ($_SERVER['HTTP_USER_AGENT'] ?? '')
+                );
+            } catch (Throwable $e) {
+            }
         } catch (Throwable $e) {
             if (isset($db) && $db instanceof PDO && $db->inTransaction()) {
                 $db->rollBack();
