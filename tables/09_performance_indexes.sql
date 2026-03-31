@@ -1,12 +1,12 @@
--- Migration 09: índices de performance e idempotência
--- Execute este script UMA vez após as migrations 01-08.
--- ?"??"? whatsapp_messages: índice único para idempotência de mensagens recebidas ?"??"?
+-- Migration 09: ï¿½ndices de performance e idempotï¿½ncia
+-- Execute este script UMA vez apï¿½s as migrations 01-08.
+-- ?"??"? whatsapp_messages: ï¿½ndice ï¿½nico para idempotï¿½ncia de mensagens recebidas ?"??"?
 -- Evita processar o mesmo message_id externo duas vezes no webhook.
 ALTER TABLE whatsapp_messages
     ADD COLUMN IF NOT EXISTS deleted_at DATETIME NULL,
     ADD UNIQUE KEY IF NOT EXISTS uniq_messages_external_id (external_message_id);
 
--- ?"??"? whatsapp_messages: busca por paciente/direção ?"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"?
+-- ?"??"? whatsapp_messages: busca por paciente/direï¿½ï¿½o ?"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"??"?
 ALTER TABLE whatsapp_messages
     ADD INDEX IF NOT EXISTS idx_messages_patient_direction (patient_id, direction);
 
@@ -14,7 +14,7 @@ ALTER TABLE whatsapp_messages
 ALTER TABLE automation_logs
     ADD INDEX IF NOT EXISTS idx_automation_appt_tipo (appointment_id, tipo_automacao);
 
--- ?"??"? automation_logs: busca por usuário + tipo + timestamp (inatividade) ?"??"??"??"??"??"??"?
+-- ?"??"? automation_logs: busca por usuï¿½rio + tipo + timestamp (inatividade) ?"??"??"??"??"??"??"?
 ALTER TABLE automation_logs
     ADD INDEX IF NOT EXISTS idx_automation_user_tipo_ts (user_id, tipo_automacao, timestamp);
 
@@ -22,7 +22,7 @@ ALTER TABLE automation_logs
 ALTER TABLE patients
     ADD INDEX IF NOT EXISTS idx_patients_user_status (user_id, status);
 
--- ?"??"? appointments: status + data_hora (automações de confirmação/lembrete) ?"??"??"??"??"?
+-- ?"??"? appointments: status + data_hora (automaï¿½ï¿½es de confirmaï¿½ï¿½o/lembrete) ?"??"??"??"??"?
 ALTER TABLE appointments
     ADD INDEX IF NOT EXISTS idx_appt_user_status_dt (user_id, status, data_hora);
 

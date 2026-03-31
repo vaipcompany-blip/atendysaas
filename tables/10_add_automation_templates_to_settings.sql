@@ -1,5 +1,5 @@
--- Migration 10: templates de automação no settings
--- Executar após as migrations 01-09.
+-- Migration 10: templates de automaï¿½ï¿½o no settings
+-- Executar apï¿½s as migrations 01-09.
 ALTER TABLE settings
     ADD COLUMN IF NOT EXISTS template_lembrete_12h TEXT NULL AFTER mensagem_confirmacao,
     ADD COLUMN IF NOT EXISTS template_lembrete_2h TEXT NULL AFTER template_lembrete_12h,
@@ -9,12 +9,12 @@ ALTER TABLE settings
 
 UPDATE settings
 SET
-    mensagem_confirmacao = COALESCE(NULLIF(TRIM(mensagem_confirmacao), ''), 'Olá {{nome}}! Sua consulta será em {{data_hora}}. Responda SIM para confirmar.'),
-    template_lembrete_12h = COALESCE(NULLIF(TRIM(template_lembrete_12h), ''), 'Olá {{nome}}! Lembrete: sua consulta é em cerca de 12 horas. Data: {{data_hora}}'),
-    template_lembrete_2h = COALESCE(NULLIF(TRIM(template_lembrete_2h), ''), 'Olá {{nome}}! Lembrete: sua consulta é em cerca de 2 horas. Data: {{data_hora}}'),
+    mensagem_confirmacao = COALESCE(NULLIF(TRIM(mensagem_confirmacao), ''), 'Olï¿½ {{nome}}! Sua consulta serï¿½ em {{data_hora}}. Responda SIM para confirmar.'),
+    template_lembrete_12h = COALESCE(NULLIF(TRIM(template_lembrete_12h), ''), 'Olï¿½ {{nome}}! Lembrete: sua consulta ï¿½ em cerca de 12 horas. Data: {{data_hora}}'),
+    template_lembrete_2h = COALESCE(NULLIF(TRIM(template_lembrete_2h), ''), 'Olï¿½ {{nome}}! Lembrete: sua consulta ï¿½ em cerca de 2 horas. Data: {{data_hora}}'),
     template_followup_falta = COALESCE(NULLIF(TRIM(template_followup_falta), ''), 'Oi {{nome}}! Sentimos sua falta na consulta. Quer reagendar?'),
-    template_followup_cancelamento = COALESCE(NULLIF(TRIM(template_followup_cancelamento), ''), 'Olá {{nome}}! Podemos te ajudar a remarcar sua consulta?'),
-    template_followup_inatividade = COALESCE(NULLIF(TRIM(template_followup_inatividade), ''), 'Oi {{nome}}! Faz um tempo que você não agenda consulta. Quer ver horários disponíveis?')
+    template_followup_cancelamento = COALESCE(NULLIF(TRIM(template_followup_cancelamento), ''), 'Olï¿½ {{nome}}! Podemos te ajudar a remarcar sua consulta?'),
+    template_followup_inatividade = COALESCE(NULLIF(TRIM(template_followup_inatividade), ''), 'Oi {{nome}}! Faz um tempo que vocï¿½ nï¿½o agenda consulta. Quer ver horï¿½rios disponï¿½veis?')
 WHERE user_id > 0;
 
 

@@ -1,4 +1,4 @@
--- Migration 07: controle de invalidação global de sessões por usuário
+-- Migration 07: controle de invalidaï¿½ï¿½o global de sessï¿½es por usuï¿½rio
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS session_version INT UNSIGNED NOT NULL DEFAULT 1 AFTER ativo;
 

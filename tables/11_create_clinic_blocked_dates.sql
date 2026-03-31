@@ -1,5 +1,5 @@
--- Migration 11: datas bloqueadas (feriados/indisponibilidades da clínica)
--- Executar após as migrations anteriores.
+-- Migration 11: datas bloqueadas (feriados/indisponibilidades da clï¿½nica)
+-- Executar apï¿½s as migrations anteriores.
 CREATE TABLE IF NOT EXISTS clinic_blocked_dates (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id INT UNSIGNED NOT NULL,

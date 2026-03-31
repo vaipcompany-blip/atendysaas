@@ -1,4 +1,4 @@
--- Migration 08: eventos de segurança por usuário
+-- Migration 08: eventos de seguranï¿½a por usuï¿½rio
 CREATE TABLE IF NOT EXISTS security_events (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id INT UNSIGNED NULL,

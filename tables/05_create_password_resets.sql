@@ -1,4 +1,4 @@
--- Migration 05: recuperação de senha
+-- Migration 05: recuperaï¿½ï¿½o de senha
 CREATE TABLE IF NOT EXISTS password_resets (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id INT UNSIGNED NOT NULL,
