@@ -16,8 +16,12 @@ final class MigrationRunner
         $executed = [];
         $skipped = [];
 
-        $this->ensureDatabaseExists();
-        $db = Database::connection();
+        try {
+            $db = Database::connection();
+        } catch (Throwable $e) {
+            $this->ensureDatabaseExists();
+            $db = Database::connection();
+        }
         $this->ensureMigrationsTable($db);
 
         foreach ($this->discoverMigrationFiles() as $filePath) {
@@ -65,8 +69,45 @@ final class MigrationRunner
             if ($trimmed === '') {
                 continue;
             }
-            $serverDb->exec($statement);
+
+            try {
+                $serverDb->exec($statement);
+            } catch (Throwable $e) {
+                if ($this->shouldIgnoreBootstrapFailure($trimmed, $e)) {
+                    continue;
+                }
+
+                throw $e;
+            }
         }
+    }
+
+    private function shouldIgnoreBootstrapFailure(string $statement, Throwable $e): bool
+    {
+        $normalized = strtoupper(ltrim($statement));
+        $isDbBootstrap = str_starts_with($normalized, 'CREATE DATABASE') || str_starts_with($normalized, 'USE ');
+        if (!$isDbBootstrap) {
+            return false;
+        }
+
+        $message = strtoupper($e->getMessage());
+        $knownManagedDbErrors = [
+            'SQLSTATE[42000]',
+            'SQLSTATE[1044]',
+            'SQLSTATE[1049]',
+            'SQLSTATE[1227]',
+            'ACCESS DENIED',
+            'SYNTAX ERROR',
+            'CREATE DATABASE',
+        ];
+
+        foreach ($knownManagedDbErrors as $needle) {
+            if (str_contains($message, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function ensureMigrationsTable(PDO $db): void
