@@ -17,104 +17,117 @@ final class WhatsAppController
         $filters = $this->normalizeFilters($_GET);
         $message = $_GET['message'] ?? null;
 
+        $patients = [];
+        $messages = [];
+        $summary = [
+            'total' => 0,
+            'outbound_total' => 0,
+            'inbound_total' => 0,
+            'delivered_or_read_total' => 0,
+            'failed_total' => 0,
+            'unique_patients' => 0,
+            'delivery_rate' => 0.0,
+        ];
+        $dailyTrend = [];
+        $statusBreakdown = [];
+        $statusInsight = [
+            'hasData' => false,
+            'message' => 'Sem dados de status no período filtrado.',
+        ];
+        $page = max(1, (int) ($_GET['page'] ?? 1));
+        $perPage = 30;
+        $totalMessages = 0;
+        $totalPages = 1;
+
         try {
             $db = Database::connection();
             $this->ensureWhatsAppInfrastructure($db);
 
-            $patientActiveClause = $this->columnExists($db, 'patients', 'deleted_at') ? ' AND deleted_at IS NULL' : '';
-            $stmtPatients = $db->prepare('SELECT id, nome, whatsapp FROM patients WHERE user_id = :user_id' . $patientActiveClause . ' ORDER BY nome ASC');
-            $stmtPatients->execute(['user_id' => $userId]);
-            $patients = $stmtPatients->fetchAll();
-
-            if (!$this->tableExists($db, 'whatsapp_messages')) {
-                View::render('whatsapp/index', [
-                    'patients' => $patients,
-                    'messages' => [],
-                    'message' => $message ?: 'Modulo WhatsApp pronto, sem historico de mensagens ainda.',
-                    'filters' => $filters,
-                    'summary' => [
-                        'total' => 0,
-                        'outbound_total' => 0,
-                        'inbound_total' => 0,
-                        'delivered_or_read_total' => 0,
-                        'failed_total' => 0,
-                        'unique_patients' => 0,
-                        'delivery_rate' => 0.0,
-                    ],
-                    'dailyTrend' => [],
-                    'statusBreakdown' => [],
-                    'statusInsight' => [
-                        'hasData' => false,
-                        'message' => 'Sem dados de status no período filtrado.',
-                    ],
-                    'pagination' => [
-                        'page' => 1,
-                        'perPage' => 30,
-                        'total' => 0,
-                        'totalPages' => 1,
-                    ],
+            try {
+                $patientActiveClause = $this->columnExists($db, 'patients', 'deleted_at') ? ' AND deleted_at IS NULL' : '';
+                $stmtPatients = $db->prepare('SELECT id, nome, whatsapp FROM patients WHERE user_id = :user_id' . $patientActiveClause . ' ORDER BY nome ASC');
+                $stmtPatients->execute(['user_id' => $userId]);
+                $patients = $stmtPatients->fetchAll();
+            } catch (Throwable $patientError) {
+                AppLogger::error('WhatsApp patient list failed', [
+                    'user_id' => $userId,
+                    'error' => $patientError->getMessage(),
                 ]);
-                return;
             }
 
-            [$whereSql, $params] = $this->buildMessageFiltersSql($userId, $filters);
-            $orderBySql = $this->buildOrderBySql($filters);
-            $summary = $this->buildSummary($db, $whereSql, $params);
-            $dailyTrend = $this->buildDailyTrend($db, $whereSql, $params, $filters);
-            $statusBreakdown = $this->buildStatusBreakdown($db, $whereSql, $params);
-            $statusInsight = $this->buildStatusInsight($statusBreakdown);
+            if ($this->tableExists($db, 'whatsapp_messages')) {
+                [$whereSql, $params] = $this->buildMessageFiltersSql($userId, $filters);
+                $orderBySql = $this->buildOrderBySql($filters);
 
-            $page = max(1, (int) ($_GET['page'] ?? 1));
-            $perPage = 30;
+                try {
+                    $summary = $this->buildSummary($db, $whereSql, $params);
+                } catch (Throwable $summaryError) {
+                    AppLogger::error('WhatsApp summary failed', [
+                        'user_id' => $userId,
+                        'error' => $summaryError->getMessage(),
+                    ]);
+                }
 
-            $stmtCount = $db->prepare(
-                'SELECT COUNT(*) AS total
-                 FROM whatsapp_messages wm
-                 LEFT JOIN patients p ON p.id = wm.patient_id
-                 ' . $whereSql
-            );
-            $stmtCount->execute($params);
-            $totalMessages = (int) ($stmtCount->fetch()['total'] ?? 0);
+                try {
+                    $dailyTrend = $this->buildDailyTrend($db, $whereSql, $params, $filters);
+                } catch (Throwable $trendError) {
+                    AppLogger::error('WhatsApp daily trend failed', [
+                        'user_id' => $userId,
+                        'error' => $trendError->getMessage(),
+                    ]);
+                }
 
-            $totalPages = max(1, (int) ceil($totalMessages / $perPage));
-            if ($page > $totalPages) {
-                $page = $totalPages;
+                try {
+                    $statusBreakdown = $this->buildStatusBreakdown($db, $whereSql, $params);
+                    $statusInsight = $this->buildStatusInsight($statusBreakdown);
+                } catch (Throwable $statusError) {
+                    AppLogger::error('WhatsApp status breakdown failed', [
+                        'user_id' => $userId,
+                        'error' => $statusError->getMessage(),
+                    ]);
+                }
+
+                try {
+                    $stmtCount = $db->prepare(
+                        'SELECT COUNT(*) AS total
+                         FROM whatsapp_messages wm
+                         LEFT JOIN patients p ON p.id = wm.patient_id
+                         ' . $whereSql
+                    );
+                    $stmtCount->execute($params);
+                    $totalMessages = (int) ($stmtCount->fetch()['total'] ?? 0);
+
+                    $totalPages = max(1, (int) ceil($totalMessages / $perPage));
+                    if ($page > $totalPages) {
+                        $page = $totalPages;
+                    }
+                    $offset = ($page - 1) * $perPage;
+
+                    $stmtMessages = $db->prepare(
+                        'SELECT wm.timestamp, wm.direction, wm.texto, wm.status, p.nome AS paciente_nome
+                         FROM whatsapp_messages wm
+                         LEFT JOIN patients p ON p.id = wm.patient_id
+                         ' . $whereSql . '
+                           ' . $orderBySql . '
+                         LIMIT :limit OFFSET :offset'
+                    );
+                    foreach ($params as $key => $value) {
+                        $stmtMessages->bindValue(':' . $key, $value);
+                    }
+                    $stmtMessages->bindValue(':limit', $perPage, PDO::PARAM_INT);
+                    $stmtMessages->bindValue(':offset', $offset, PDO::PARAM_INT);
+                    $stmtMessages->execute();
+                    $messages = $stmtMessages->fetchAll();
+                } catch (Throwable $historyError) {
+                    AppLogger::error('WhatsApp history failed', [
+                        'user_id' => $userId,
+                        'error' => $historyError->getMessage(),
+                    ]);
+                    $messages = [];
+                    $totalMessages = 0;
+                    $totalPages = 1;
+                }
             }
-            $offset = ($page - 1) * $perPage;
-
-            $stmtMessages = $db->prepare(
-                'SELECT wm.timestamp, wm.direction, wm.texto, wm.status, p.nome AS paciente_nome
-                 FROM whatsapp_messages wm
-                 LEFT JOIN patients p ON p.id = wm.patient_id
-                 ' . $whereSql . '
-                   ' . $orderBySql . '
-                 LIMIT :limit OFFSET :offset'
-            );
-            foreach ($params as $key => $value) {
-                $stmtMessages->bindValue(':' . $key, $value);
-            }
-            $stmtMessages->bindValue(':limit', $perPage, PDO::PARAM_INT);
-            $stmtMessages->bindValue(':offset', $offset, PDO::PARAM_INT);
-            $stmtMessages->execute();
-            $messages = $stmtMessages->fetchAll();
-
-            View::render('whatsapp/index', [
-                'patients' => $patients,
-                'messages' => $messages,
-                'message' => $message,
-                'filters' => $filters,
-                'summary' => $summary,
-                'dailyTrend' => $dailyTrend,
-                'statusBreakdown' => $statusBreakdown,
-                'statusInsight' => $statusInsight,
-                'pagination' => [
-                    'page' => $page,
-                    'perPage' => $perPage,
-                    'total' => $totalMessages,
-                    'totalPages' => $totalPages,
-                ],
-            ]);
-            return;
         } catch (Throwable $e) {
             AppLogger::error('WhatsApp index failed', [
                 'user_id' => $userId,
@@ -122,45 +135,24 @@ final class WhatsAppController
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
             ]);
-
-            $patients = [];
-            try {
-                $dbFallback = Database::connection();
-                $stmtPatients = $dbFallback->prepare('SELECT id, nome, whatsapp FROM patients WHERE user_id = :user_id ORDER BY nome ASC');
-                $stmtPatients->execute(['user_id' => $userId]);
-                $patients = $stmtPatients->fetchAll();
-            } catch (Throwable $inner) {
-                // Keep empty list when even fallback patient query fails.
-            }
-
-            View::render('whatsapp/index', [
-                'patients' => $patients,
-                'messages' => [],
-                'message' => $message ?: 'WhatsApp com dados parciais no momento. Tente novamente em instantes.',
-                'filters' => $filters,
-                'summary' => [
-                    'total' => 0,
-                    'outbound_total' => 0,
-                    'inbound_total' => 0,
-                    'delivered_or_read_total' => 0,
-                    'failed_total' => 0,
-                    'unique_patients' => 0,
-                    'delivery_rate' => 0.0,
-                ],
-                'dailyTrend' => [],
-                'statusBreakdown' => [],
-                'statusInsight' => [
-                    'hasData' => false,
-                    'message' => 'Sem dados de status no período filtrado.',
-                ],
-                'pagination' => [
-                    'page' => 1,
-                    'perPage' => 30,
-                    'total' => 0,
-                    'totalPages' => 1,
-                ],
-            ]);
         }
+
+        View::render('whatsapp/index', [
+            'patients' => $patients,
+            'messages' => $messages,
+            'message' => $message,
+            'filters' => $filters,
+            'summary' => $summary,
+            'dailyTrend' => $dailyTrend,
+            'statusBreakdown' => $statusBreakdown,
+            'statusInsight' => $statusInsight,
+            'pagination' => [
+                'page' => $page,
+                'perPage' => $perPage,
+                'total' => $totalMessages,
+                'totalPages' => $totalPages,
+            ],
+        ]);
     }
 
     public function exportCsv(): void
