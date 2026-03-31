@@ -19,11 +19,43 @@ final class WhatsAppController
 
         try {
             $db = Database::connection();
+            $this->ensureWhatsAppInfrastructure($db);
 
             $patientActiveClause = $this->columnExists($db, 'patients', 'deleted_at') ? ' AND deleted_at IS NULL' : '';
             $stmtPatients = $db->prepare('SELECT id, nome, whatsapp FROM patients WHERE user_id = :user_id' . $patientActiveClause . ' ORDER BY nome ASC');
             $stmtPatients->execute(['user_id' => $userId]);
             $patients = $stmtPatients->fetchAll();
+
+            if (!$this->tableExists($db, 'whatsapp_messages')) {
+                View::render('whatsapp/index', [
+                    'patients' => $patients,
+                    'messages' => [],
+                    'message' => $message ?: 'Modulo WhatsApp pronto, sem historico de mensagens ainda.',
+                    'filters' => $filters,
+                    'summary' => [
+                        'total' => 0,
+                        'outbound_total' => 0,
+                        'inbound_total' => 0,
+                        'delivered_or_read_total' => 0,
+                        'failed_total' => 0,
+                        'unique_patients' => 0,
+                        'delivery_rate' => 0.0,
+                    ],
+                    'dailyTrend' => [],
+                    'statusBreakdown' => [],
+                    'statusInsight' => [
+                        'hasData' => false,
+                        'message' => 'Sem dados de status no período filtrado.',
+                    ],
+                    'pagination' => [
+                        'page' => 1,
+                        'perPage' => 30,
+                        'total' => 0,
+                        'totalPages' => 1,
+                    ],
+                ]);
+                return;
+            }
 
             [$whereSql, $params] = $this->buildMessageFiltersSql($userId, $filters);
             $orderBySql = $this->buildOrderBySql($filters);
@@ -136,6 +168,7 @@ final class WhatsAppController
         try {
             $userId = (int) (Auth::user()['id'] ?? 0);
             $db = Database::connection();
+            $this->ensureWhatsAppInfrastructure($db);
 
             $filters = $this->normalizeFilters($_GET);
             [$whereSql, $params] = $this->buildMessageFiltersSql($userId, $filters);
@@ -197,6 +230,9 @@ final class WhatsAppController
         }
 
         try {
+            $db = Database::connection();
+            $this->ensureWhatsAppInfrastructure($db);
+
             $this->service->sendManualMessage($userId, $patientId, $text, null);
             audit_log_event($userId, 'whatsapp_manual_sent', 'Mensagem manual enviada para paciente #' . $patientId . '.');
             redirect(base_url('route=whatsapp&message=Mensagem enviada (simulada)'));
@@ -225,6 +261,9 @@ final class WhatsAppController
         }
 
         try {
+            $db = Database::connection();
+            $this->ensureWhatsAppInfrastructure($db);
+
             $confirmed = $this->service->receiveSimulatedInbound($userId, $patientId, $text);
             audit_log_event($userId, 'whatsapp_inbound_simulated', 'Mensagem simulada recebida para paciente #' . $patientId . '.');
             if ($confirmed) {
@@ -250,6 +289,9 @@ final class WhatsAppController
 
         $userId = (int) (Auth::user()['id'] ?? 0);
         try {
+            $db = Database::connection();
+            $this->ensureWhatsAppInfrastructure($db);
+
             $runner = new AutomationJobRunner();
             $execution = $runner->runUserAutomation($userId, false, function () use ($userId): array {
                 return $this->service->runAllAutomations($userId);
@@ -291,6 +333,9 @@ final class WhatsAppController
 
         $userId = (int) (Auth::user()['id'] ?? 0);
         try {
+            $db = Database::connection();
+            $this->ensureWhatsAppInfrastructure($db);
+
             $processed = $this->service->runReminders($userId);
             audit_log_event($userId, 'whatsapp_reminders_run', 'Lembretes executados: ' . $processed . '.');
 
@@ -312,6 +357,9 @@ final class WhatsAppController
 
         $userId = (int) (Auth::user()['id'] ?? 0);
         try {
+            $db = Database::connection();
+            $this->ensureWhatsAppInfrastructure($db);
+
             $processed = $this->service->runFollowUps($userId);
             audit_log_event($userId, 'whatsapp_followups_run', 'Follow-ups executados: ' . $processed . '.');
 
@@ -574,6 +622,84 @@ final class WhatsAppController
         } catch (Throwable $e) {
             return false;
         }
+    }
+
+    private function tableExists(PDO $db, string $table): bool
+    {
+        try {
+            $stmt = $db->prepare(
+                'SELECT COUNT(*) AS total
+                 FROM INFORMATION_SCHEMA.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE()
+                   AND TABLE_NAME = :table_name'
+            );
+            $stmt->execute(['table_name' => $table]);
+            return (int) ($stmt->fetch()['total'] ?? 0) > 0;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
+    private function ensureWhatsAppInfrastructure(PDO $db): void
+    {
+        $db->exec(
+            'CREATE TABLE IF NOT EXISTS whatsapp_messages (
+                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                user_id INT UNSIGNED NOT NULL,
+                patient_id INT UNSIGNED NULL,
+                appointment_id INT UNSIGNED NULL,
+                direction VARCHAR(20) NOT NULL,
+                texto TEXT NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT "sent",
+                external_message_id VARCHAR(100) NULL,
+                timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                KEY idx_messages_user (user_id),
+                KEY idx_messages_patient (patient_id),
+                KEY idx_messages_appointment (appointment_id),
+                KEY idx_messages_ext (external_message_id)
+            ) ENGINE=InnoDB'
+        );
+
+        $db->exec(
+            'CREATE TABLE IF NOT EXISTS automation_logs (
+                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                user_id INT UNSIGNED NOT NULL,
+                appointment_id INT UNSIGNED NULL,
+                tipo_automacao VARCHAR(50) NOT NULL,
+                status_envio VARCHAR(30) NOT NULL,
+                detalhes VARCHAR(255) NULL,
+                timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                KEY idx_automation_user (user_id),
+                KEY idx_automation_appointment (appointment_id)
+            ) ENGINE=InnoDB'
+        );
+
+        $db->exec(
+            'CREATE TABLE IF NOT EXISTS whatsapp_auto_replies (
+                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                user_id INT UNSIGNED NOT NULL,
+                keyword VARCHAR(100) NOT NULL,
+                reply TEXT NOT NULL,
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                sort_order INT NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NULL,
+                KEY idx_auto_replies_user (user_id, is_active)
+            ) ENGINE=InnoDB'
+        );
+
+        $db->exec(
+            'CREATE TABLE IF NOT EXISTS whatsapp_conversation_state (
+                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                user_id INT UNSIGNED NOT NULL,
+                patient_id INT UNSIGNED NOT NULL,
+                state VARCHAR(40) NOT NULL,
+                payload TEXT NULL,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uniq_conversation_state (user_id, patient_id),
+                KEY idx_conversation_user (user_id)
+            ) ENGINE=InnoDB'
+        );
     }
 }
 
