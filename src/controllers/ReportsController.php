@@ -8,9 +8,6 @@ final class ReportsController
 
     public function index(): void
     {
-        $userId = (int) (Auth::user()['id'] ?? 0);
-        $db = Database::connection();
-
         $preset = (string) ($_GET['preset'] ?? '');
         if (!in_array($preset, self::PRESETS, true)) {
             $preset = '';
@@ -19,94 +16,142 @@ final class ReportsController
         [$from, $to] = $this->resolveRange((string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''), $preset);
         $compareEnabled = (int) ($_GET['compare'] ?? 0) === 1;
 
-        $summary = $this->fetchSummary($userId, $from, $to, $db);
-        $statusRows = $this->fetchStatusRows($userId, $from, $to, $db);
-        $procedureRows = $this->fetchProcedureRows($userId, $from, $to, $db);
-        $dailyRows = $this->fetchDailyRows($userId, $from, $to, $db);
+        try {
+            $userId = (int) (Auth::user()['id'] ?? 0);
+            $db = Database::connection();
 
-        $summaryPrevious = null;
-        $comparison = null;
-        if ($compareEnabled) {
-            [$previousFrom, $previousTo] = $this->previousRange($from, $to);
-            $summaryPrevious = $this->fetchSummary($userId, $previousFrom, $previousTo, $db);
-            $comparison = $this->buildComparison($summary, $summaryPrevious);
+            $summary = $this->fetchSummary($userId, $from, $to, $db);
+            $statusRows = $this->fetchStatusRows($userId, $from, $to, $db);
+            $procedureRows = $this->fetchProcedureRows($userId, $from, $to, $db);
+            $dailyRows = $this->fetchDailyRows($userId, $from, $to, $db);
+
+            $summaryPrevious = null;
+            $comparison = null;
+            if ($compareEnabled) {
+                [$previousFrom, $previousTo] = $this->previousRange($from, $to);
+                $summaryPrevious = $this->fetchSummary($userId, $previousFrom, $previousTo, $db);
+                $comparison = $this->buildComparison($summary, $summaryPrevious);
+            }
+
+            View::render('reports/index', [
+                'from' => $from,
+                'to' => $to,
+                'preset' => $preset,
+                'compareEnabled' => $compareEnabled,
+                'summary' => $summary,
+                'summaryPrevious' => $summaryPrevious,
+                'comparison' => $comparison,
+                'statusRows' => $statusRows,
+                'procedureRows' => $procedureRows,
+                'dailyRows' => $dailyRows,
+            ]);
+            return;
+        } catch (Throwable $e) {
+            AppLogger::error('Reports load failed', [
+                'user_id' => (int) (Auth::user()['id'] ?? 0),
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            View::render('reports/index', [
+                'from' => $from,
+                'to' => $to,
+                'preset' => $preset,
+                'compareEnabled' => false,
+                'summary' => [
+                    'appointments_total' => 0,
+                    'appointments_confirmed' => 0,
+                    'confirmation_rate' => 0.0,
+                    'unique_patients' => 0,
+                    'paid_revenue' => 0.0,
+                ],
+                'summaryPrevious' => null,
+                'comparison' => null,
+                'statusRows' => [],
+                'procedureRows' => [],
+                'dailyRows' => [],
+            ]);
         }
-
-        View::render('reports/index', [
-            'from' => $from,
-            'to' => $to,
-            'preset' => $preset,
-            'compareEnabled' => $compareEnabled,
-            'summary' => $summary,
-            'summaryPrevious' => $summaryPrevious,
-            'comparison' => $comparison,
-            'statusRows' => $statusRows,
-            'procedureRows' => $procedureRows,
-            'dailyRows' => $dailyRows,
-        ]);
     }
 
     public function exportCsv(): void
     {
-        $userId = (int) (Auth::user()['id'] ?? 0);
-        $db = Database::connection();
+        try {
+            $userId = (int) (Auth::user()['id'] ?? 0);
+            $db = Database::connection();
 
-        $preset = (string) ($_GET['preset'] ?? '');
-        if (!in_array($preset, self::PRESETS, true)) {
-            $preset = '';
-        }
-        [$from, $to] = $this->resolveRange((string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''), $preset);
-        $dailyRows = $this->fetchDailyRows($userId, $from, $to, $db);
+            $preset = (string) ($_GET['preset'] ?? '');
+            if (!in_array($preset, self::PRESETS, true)) {
+                $preset = '';
+            }
+            [$from, $to] = $this->resolveRange((string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''), $preset);
+            $dailyRows = $this->fetchDailyRows($userId, $from, $to, $db);
 
-        $fileName = 'relatorio-' . date('Ymd-His') . '.csv';
-        header('Content-Type: text/csv; charset=UTF-8');
-        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+            $fileName = 'relatorio-' . date('Ymd-His') . '.csv';
+            header('Content-Type: text/csv; charset=UTF-8');
+            header('Content-Disposition: attachment; filename="' . $fileName . '"');
 
-        $output = fopen('php://output', 'wb');
-        if ($output === false) {
-            http_response_code(500);
-            echo 'Falha ao gerar CSV';
+            $output = fopen('php://output', 'wb');
+            if ($output === false) {
+                http_response_code(500);
+                echo 'Falha ao gerar CSV';
+                exit;
+            }
+
+            fwrite($output, "\xEF\xBB\xBF");
+            fputcsv($output, ['Data', 'Consultas', 'Confirmadas/Realizadas', 'Receita recebida (R$)'], ';');
+
+            foreach ($dailyRows as $row) {
+                fputcsv($output, [
+                    (string) ($row['day'] ?? ''),
+                    (string) ((int) ($row['appointments_total'] ?? 0)),
+                    (string) ((int) ($row['confirmed_total'] ?? 0)),
+                    number_format((float) ($row['paid_revenue'] ?? 0), 2, '.', ''),
+                ], ';');
+            }
+
+            fclose($output);
             exit;
+        } catch (Throwable $e) {
+            AppLogger::error('Reports CSV export failed', [
+                'user_id' => (int) (Auth::user()['id'] ?? 0),
+                'error' => $e->getMessage(),
+            ]);
+            redirect(base_url('route=reports&message=' . urlencode('Exportacao indisponivel no momento.')));
         }
-
-        fwrite($output, "\xEF\xBB\xBF");
-        fputcsv($output, ['Data', 'Consultas', 'Confirmadas/Realizadas', 'Receita recebida (R$)'], ';');
-
-        foreach ($dailyRows as $row) {
-            fputcsv($output, [
-                (string) ($row['day'] ?? ''),
-                (string) ((int) ($row['appointments_total'] ?? 0)),
-                (string) ((int) ($row['confirmed_total'] ?? 0)),
-                number_format((float) ($row['paid_revenue'] ?? 0), 2, '.', ''),
-            ], ';');
-        }
-
-        fclose($output);
-        exit;
     }
 
     public function exportPdf(): void
     {
-        $userId = (int) (Auth::user()['id'] ?? 0);
-        $db = Database::connection();
+        try {
+            $userId = (int) (Auth::user()['id'] ?? 0);
+            $db = Database::connection();
 
-        $preset = (string) ($_GET['preset'] ?? '');
-        if (!in_array($preset, self::PRESETS, true)) {
-            $preset = '';
+            $preset = (string) ($_GET['preset'] ?? '');
+            if (!in_array($preset, self::PRESETS, true)) {
+                $preset = '';
+            }
+            [$from, $to] = $this->resolveRange((string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''), $preset);
+
+            View::render('reports/export_pdf', [
+                'from' => $from,
+                'to' => $to,
+                'summary' => $this->fetchSummary($userId, $from, $to, $db),
+                'statusRows' => $this->fetchStatusRows($userId, $from, $to, $db),
+                'procedureRows' => $this->fetchProcedureRows($userId, $from, $to, $db),
+                'dailyRows' => $this->fetchDailyRows($userId, $from, $to, $db),
+                'generatedAt' => date('d/m/Y H:i'),
+                'user' => Auth::user(),
+            ]);
+            exit;
+        } catch (Throwable $e) {
+            AppLogger::error('Reports PDF export failed', [
+                'user_id' => (int) (Auth::user()['id'] ?? 0),
+                'error' => $e->getMessage(),
+            ]);
+            redirect(base_url('route=reports&message=' . urlencode('Exportacao PDF indisponivel no momento.')));
         }
-        [$from, $to] = $this->resolveRange((string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''), $preset);
-
-        View::render('reports/export_pdf', [
-            'from' => $from,
-            'to' => $to,
-            'summary' => $this->fetchSummary($userId, $from, $to, $db),
-            'statusRows' => $this->fetchStatusRows($userId, $from, $to, $db),
-            'procedureRows' => $this->fetchProcedureRows($userId, $from, $to, $db),
-            'dailyRows' => $this->fetchDailyRows($userId, $from, $to, $db),
-            'generatedAt' => date('d/m/Y H:i'),
-            'user' => Auth::user(),
-        ]);
-        exit;
     }
 
     private function resolveRange(string $from, string $to, string $preset = ''): array

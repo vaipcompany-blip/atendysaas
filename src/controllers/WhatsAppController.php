@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 declare(strict_types=1);
 
@@ -14,115 +14,161 @@ final class WhatsAppController
     public function index(): void
     {
         $userId = (int) (Auth::user()['id'] ?? 0);
-        $db = Database::connection();
-
-        $stmtPatients = $db->prepare('SELECT id, nome, whatsapp FROM patients WHERE user_id = :user_id AND deleted_at IS NULL ORDER BY nome ASC');
-        $stmtPatients->execute(['user_id' => $userId]);
-        $patients = $stmtPatients->fetchAll();
-
         $filters = $this->normalizeFilters($_GET);
-        [$whereSql, $params] = $this->buildMessageFiltersSql($userId, $filters);
-        $orderBySql = $this->buildOrderBySql($filters);
-        $summary = $this->buildSummary($db, $whereSql, $params);
-        $dailyTrend = $this->buildDailyTrend($db, $whereSql, $params, $filters);
-        $statusBreakdown = $this->buildStatusBreakdown($db, $whereSql, $params);
-        $statusInsight = $this->buildStatusInsight($statusBreakdown);
-
-        $page = max(1, (int) ($_GET['page'] ?? 1));
-        $perPage = 30;
-
-        $stmtCount = $db->prepare(
-            'SELECT COUNT(*) AS total
-             FROM whatsapp_messages wm
-             LEFT JOIN patients p ON p.id = wm.patient_id
-             ' . $whereSql
-        );
-        $stmtCount->execute($params);
-        $totalMessages = (int) ($stmtCount->fetch()['total'] ?? 0);
-
-        $totalPages = max(1, (int) ceil($totalMessages / $perPage));
-        if ($page > $totalPages) {
-            $page = $totalPages;
-        }
-        $offset = ($page - 1) * $perPage;
-
-        $stmtMessages = $db->prepare(
-            'SELECT wm.timestamp, wm.direction, wm.texto, wm.status, p.nome AS paciente_nome
-             FROM whatsapp_messages wm
-             LEFT JOIN patients p ON p.id = wm.patient_id
-             ' . $whereSql . '
-               ' . $orderBySql . '
-             LIMIT :limit OFFSET :offset'
-        );
-        foreach ($params as $key => $value) {
-            $stmtMessages->bindValue(':' . $key, $value);
-        }
-        $stmtMessages->bindValue(':limit', $perPage, PDO::PARAM_INT);
-        $stmtMessages->bindValue(':offset', $offset, PDO::PARAM_INT);
-        $stmtMessages->execute();
-        $messages = $stmtMessages->fetchAll();
-
         $message = $_GET['message'] ?? null;
 
-        View::render('whatsapp/index', [
-            'patients' => $patients,
-            'messages' => $messages,
-            'message' => $message,
-            'filters' => $filters,
-            'summary' => $summary,
-            'dailyTrend' => $dailyTrend,
-            'statusBreakdown' => $statusBreakdown,
-            'statusInsight' => $statusInsight,
-            'pagination' => [
-                'page' => $page,
-                'perPage' => $perPage,
-                'total' => $totalMessages,
-                'totalPages' => $totalPages,
-            ],
-        ]);
+        try {
+            $db = Database::connection();
+
+            $stmtPatients = $db->prepare('SELECT id, nome, whatsapp FROM patients WHERE user_id = :user_id AND deleted_at IS NULL ORDER BY nome ASC');
+            $stmtPatients->execute(['user_id' => $userId]);
+            $patients = $stmtPatients->fetchAll();
+
+            [$whereSql, $params] = $this->buildMessageFiltersSql($userId, $filters);
+            $orderBySql = $this->buildOrderBySql($filters);
+            $summary = $this->buildSummary($db, $whereSql, $params);
+            $dailyTrend = $this->buildDailyTrend($db, $whereSql, $params, $filters);
+            $statusBreakdown = $this->buildStatusBreakdown($db, $whereSql, $params);
+            $statusInsight = $this->buildStatusInsight($statusBreakdown);
+
+            $page = max(1, (int) ($_GET['page'] ?? 1));
+            $perPage = 30;
+
+            $stmtCount = $db->prepare(
+                'SELECT COUNT(*) AS total
+                 FROM whatsapp_messages wm
+                 LEFT JOIN patients p ON p.id = wm.patient_id
+                 ' . $whereSql
+            );
+            $stmtCount->execute($params);
+            $totalMessages = (int) ($stmtCount->fetch()['total'] ?? 0);
+
+            $totalPages = max(1, (int) ceil($totalMessages / $perPage));
+            if ($page > $totalPages) {
+                $page = $totalPages;
+            }
+            $offset = ($page - 1) * $perPage;
+
+            $stmtMessages = $db->prepare(
+                'SELECT wm.timestamp, wm.direction, wm.texto, wm.status, p.nome AS paciente_nome
+                 FROM whatsapp_messages wm
+                 LEFT JOIN patients p ON p.id = wm.patient_id
+                 ' . $whereSql . '
+                   ' . $orderBySql . '
+                 LIMIT :limit OFFSET :offset'
+            );
+            foreach ($params as $key => $value) {
+                $stmtMessages->bindValue(':' . $key, $value);
+            }
+            $stmtMessages->bindValue(':limit', $perPage, PDO::PARAM_INT);
+            $stmtMessages->bindValue(':offset', $offset, PDO::PARAM_INT);
+            $stmtMessages->execute();
+            $messages = $stmtMessages->fetchAll();
+
+            View::render('whatsapp/index', [
+                'patients' => $patients,
+                'messages' => $messages,
+                'message' => $message,
+                'filters' => $filters,
+                'summary' => $summary,
+                'dailyTrend' => $dailyTrend,
+                'statusBreakdown' => $statusBreakdown,
+                'statusInsight' => $statusInsight,
+                'pagination' => [
+                    'page' => $page,
+                    'perPage' => $perPage,
+                    'total' => $totalMessages,
+                    'totalPages' => $totalPages,
+                ],
+            ]);
+            return;
+        } catch (Throwable $e) {
+            AppLogger::error('WhatsApp index failed', [
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            View::render('whatsapp/index', [
+                'patients' => [],
+                'messages' => [],
+                'message' => $message ?: 'Modulo WhatsApp temporariamente indisponivel.',
+                'filters' => $filters,
+                'summary' => [
+                    'total' => 0,
+                    'outbound_total' => 0,
+                    'inbound_total' => 0,
+                    'delivered_or_read_total' => 0,
+                    'failed_total' => 0,
+                    'unique_patients' => 0,
+                    'delivery_rate' => 0.0,
+                ],
+                'dailyTrend' => [],
+                'statusBreakdown' => [],
+                'statusInsight' => [
+                    'hasData' => false,
+                    'message' => 'Sem dados de status no período filtrado.',
+                ],
+                'pagination' => [
+                    'page' => 1,
+                    'perPage' => 30,
+                    'total' => 0,
+                    'totalPages' => 1,
+                ],
+            ]);
+        }
     }
 
     public function exportCsv(): void
     {
-        $userId = (int) (Auth::user()['id'] ?? 0);
-        $db = Database::connection();
+        try {
+            $userId = (int) (Auth::user()['id'] ?? 0);
+            $db = Database::connection();
 
-        $filters = $this->normalizeFilters($_GET);
-        [$whereSql, $params] = $this->buildMessageFiltersSql($userId, $filters);
-        $orderBySql = $this->buildOrderBySql($filters);
+            $filters = $this->normalizeFilters($_GET);
+            [$whereSql, $params] = $this->buildMessageFiltersSql($userId, $filters);
+            $orderBySql = $this->buildOrderBySql($filters);
 
-        $stmt = $db->prepare(
-            'SELECT wm.timestamp, p.nome AS paciente_nome, wm.direction, wm.status, wm.texto
-             FROM whatsapp_messages wm
-             LEFT JOIN patients p ON p.id = wm.patient_id
-             ' . $whereSql . '
-               ' . $orderBySql
-        );
-        $stmt->execute($params);
-        $rows = $stmt->fetchAll();
+            $stmt = $db->prepare(
+                'SELECT wm.timestamp, p.nome AS paciente_nome, wm.direction, wm.status, wm.texto
+                 FROM whatsapp_messages wm
+                 LEFT JOIN patients p ON p.id = wm.patient_id
+                 ' . $whereSql . '
+                   ' . $orderBySql
+            );
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll();
 
-        header('Content-Type: text/csv; charset=UTF-8');
-        header('Content-Disposition: attachment; filename="whatsapp_mensagens.csv"');
+            header('Content-Type: text/csv; charset=UTF-8');
+            header('Content-Disposition: attachment; filename="whatsapp_mensagens.csv"');
 
-        $output = fopen('php://output', 'w');
-        if ($output === false) {
-            return;
+            $output = fopen('php://output', 'w');
+            if ($output === false) {
+                return;
+            }
+
+            fwrite($output, "\xEF\xBB\xBF");
+            fputcsv($output, ['Data/Hora', 'Paciente', 'Direção', 'Status', 'Mensagem'], ';');
+
+            foreach ($rows as $row) {
+                fputcsv($output, [
+                    (string) ($row['timestamp'] ?? ''),
+                    (string) ($row['paciente_nome'] ?? ''),
+                    (string) ($row['direction'] ?? ''),
+                    (string) ($row['status'] ?? ''),
+                    (string) ($row['texto'] ?? ''),
+                ], ';');
+            }
+
+            fclose($output);
+        } catch (Throwable $e) {
+            AppLogger::error('WhatsApp CSV export failed', [
+                'user_id' => (int) (Auth::user()['id'] ?? 0),
+                'error' => $e->getMessage(),
+            ]);
+            redirect(base_url('route=whatsapp&message=' . urlencode('Exportacao indisponivel no momento.')));
         }
-
-        fwrite($output, "\xEF\xBB\xBF");
-        fputcsv($output, ['Data/Hora', 'Paciente', 'Direção', 'Status', 'Mensagem'], ';');
-
-        foreach ($rows as $row) {
-            fputcsv($output, [
-                (string) ($row['timestamp'] ?? ''),
-                (string) ($row['paciente_nome'] ?? ''),
-                (string) ($row['direction'] ?? ''),
-                (string) ($row['status'] ?? ''),
-                (string) ($row['texto'] ?? ''),
-            ], ';');
-        }
-
-        fclose($output);
     }
 
     public function sendManual(): void
@@ -139,9 +185,18 @@ final class WhatsAppController
             redirect(base_url('route=whatsapp&message=Selecione paciente e mensagem'));
         }
 
-        $this->service->sendManualMessage($userId, $patientId, $text, null);
-        audit_log_event($userId, 'whatsapp_manual_sent', 'Mensagem manual enviada para paciente #' . $patientId . '.');
-        redirect(base_url('route=whatsapp&message=Mensagem enviada (simulada)'));
+        try {
+            $this->service->sendManualMessage($userId, $patientId, $text, null);
+            audit_log_event($userId, 'whatsapp_manual_sent', 'Mensagem manual enviada para paciente #' . $patientId . '.');
+            redirect(base_url('route=whatsapp&message=Mensagem enviada (simulada)'));
+        } catch (Throwable $e) {
+            AppLogger::error('WhatsApp manual send failed', [
+                'user_id' => $userId,
+                'patient_id' => $patientId,
+                'error' => $e->getMessage(),
+            ]);
+            redirect(base_url('route=whatsapp&message=' . urlencode('Falha ao enviar mensagem.')));
+        }
     }
 
     public function receiveSimulated(): void
@@ -158,13 +213,22 @@ final class WhatsAppController
             redirect(base_url('route=whatsapp&message=Selecione paciente e mensagem'));
         }
 
-        $confirmed = $this->service->receiveSimulatedInbound($userId, $patientId, $text);
-        audit_log_event($userId, 'whatsapp_inbound_simulated', 'Mensagem simulada recebida para paciente #' . $patientId . '.');
-        if ($confirmed) {
-            redirect(base_url('route=whatsapp&message=Mensagem recebida e consulta confirmada automaticamente'));
-        }
+        try {
+            $confirmed = $this->service->receiveSimulatedInbound($userId, $patientId, $text);
+            audit_log_event($userId, 'whatsapp_inbound_simulated', 'Mensagem simulada recebida para paciente #' . $patientId . '.');
+            if ($confirmed) {
+                redirect(base_url('route=whatsapp&message=Mensagem recebida e consulta confirmada automaticamente'));
+            }
 
-        redirect(base_url('route=whatsapp&message=Mensagem recebida (sem confirmação automática)'));
+            redirect(base_url('route=whatsapp&message=Mensagem recebida (sem confirmação automática)'));
+        } catch (Throwable $e) {
+            AppLogger::error('WhatsApp simulated receive failed', [
+                'user_id' => $userId,
+                'patient_id' => $patientId,
+                'error' => $e->getMessage(),
+            ]);
+            redirect(base_url('route=whatsapp&message=' . urlencode('Falha ao processar mensagem recebida.')));
+        }
     }
 
     public function runAutomations(): void
@@ -174,30 +238,38 @@ final class WhatsAppController
         }
 
         $userId = (int) (Auth::user()['id'] ?? 0);
-        $runner = new AutomationJobRunner();
-        $execution = $runner->runUserAutomation($userId, false, function () use ($userId): array {
-            return $this->service->runAllAutomations($userId);
-        });
-        $result = (array) ($execution['result'] ?? []);
+        try {
+            $runner = new AutomationJobRunner();
+            $execution = $runner->runUserAutomation($userId, false, function () use ($userId): array {
+                return $this->service->runAllAutomations($userId);
+            });
+            $result = (array) ($execution['result'] ?? []);
 
-        if (($execution['status'] ?? '') === 'skipped') {
-            redirect(base_url('route=whatsapp&message=' . urlencode((string) ($execution['message'] ?? 'Automações em execução.'))));
+            if (($execution['status'] ?? '') === 'skipped') {
+                redirect(base_url('route=whatsapp&message=' . urlencode((string) ($execution['message'] ?? 'Automações em execução.'))));
+            }
+
+            if (($execution['status'] ?? '') === 'failed') {
+                redirect(base_url('route=whatsapp&message=' . urlencode('Falha ao executar automações: ' . (string) ($execution['message'] ?? 'erro interno'))));
+            }
+
+            $text = sprintf(
+                'Automações executadas. Confirmações: %d | Lembretes: %d | Follow-up: %d | Total: %d',
+                (int) $result['confirmations'],
+                (int) $result['reminders'],
+                (int) $result['followups'],
+                (int) $result['total']
+            );
+            audit_log_event($userId, 'whatsapp_automations_run', 'Automações executadas. Total=' . (int) $result['total'] . '.');
+
+            redirect(base_url('route=whatsapp&message=' . urlencode($text)));
+        } catch (Throwable $e) {
+            AppLogger::error('WhatsApp automations failed', [
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+            redirect(base_url('route=whatsapp&message=' . urlencode('Falha ao executar automações.')));
         }
-
-        if (($execution['status'] ?? '') === 'failed') {
-            redirect(base_url('route=whatsapp&message=' . urlencode('Falha ao executar automações: ' . (string) ($execution['message'] ?? 'erro interno'))));
-        }
-
-        $text = sprintf(
-            'Automações executadas. Confirmações: %d | Lembretes: %d | Follow-up: %d | Total: %d',
-            (int) $result['confirmations'],
-            (int) $result['reminders'],
-            (int) $result['followups'],
-            (int) $result['total']
-        );
-        audit_log_event($userId, 'whatsapp_automations_run', 'Automações executadas. Total=' . (int) $result['total'] . '.');
-
-        redirect(base_url('route=whatsapp&message=' . urlencode($text)));
     }
 
     public function runReminders(): void
@@ -207,10 +279,18 @@ final class WhatsAppController
         }
 
         $userId = (int) (Auth::user()['id'] ?? 0);
-        $processed = $this->service->runReminders($userId);
-        audit_log_event($userId, 'whatsapp_reminders_run', 'Lembretes executados: ' . $processed . '.');
+        try {
+            $processed = $this->service->runReminders($userId);
+            audit_log_event($userId, 'whatsapp_reminders_run', 'Lembretes executados: ' . $processed . '.');
 
-        redirect(base_url('route=whatsapp&message=Lembretes executados: ' . $processed));
+            redirect(base_url('route=whatsapp&message=Lembretes executados: ' . $processed));
+        } catch (Throwable $e) {
+            AppLogger::error('WhatsApp reminders failed', [
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+            redirect(base_url('route=whatsapp&message=' . urlencode('Falha ao executar lembretes.')));
+        }
     }
 
     public function runFollowUps(): void
@@ -220,10 +300,18 @@ final class WhatsAppController
         }
 
         $userId = (int) (Auth::user()['id'] ?? 0);
-        $processed = $this->service->runFollowUps($userId);
-        audit_log_event($userId, 'whatsapp_followups_run', 'Follow-ups executados: ' . $processed . '.');
+        try {
+            $processed = $this->service->runFollowUps($userId);
+            audit_log_event($userId, 'whatsapp_followups_run', 'Follow-ups executados: ' . $processed . '.');
 
-        redirect(base_url('route=whatsapp&message=Follow-up executado: ' . $processed));
+            redirect(base_url('route=whatsapp&message=Follow-up executado: ' . $processed));
+        } catch (Throwable $e) {
+            AppLogger::error('WhatsApp followups failed', [
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+            redirect(base_url('route=whatsapp&message=' . urlencode('Falha ao executar follow-up.')));
+        }
     }
 
     private function normalizeFilters(array $input): array

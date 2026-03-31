@@ -411,11 +411,7 @@ final class DashboardController
 
         $conversionRate = $leads > 0 ? round(($confirmed / $leads) * 100, 1) : 0.0;
         
-        // Fetch target from user's settings
-        $settingsStmt = $db->prepare('SELECT meta_conversao_mensal FROM settings WHERE user_id = :uid LIMIT 1');
-        $settingsStmt->execute(['uid' => $userId]);
-        $settings = $settingsStmt->fetch();
-        $targetRate = (float) ($settings['meta_conversao_mensal'] ?? 60.0);
+        $targetRate = $this->fetchMonthlyConversionTarget($userId, $db);
         
         $achievementRate = $targetRate > 0 ? round(min(200.0, ($conversionRate / $targetRate) * 100), 1) : 0.0;
 
@@ -427,6 +423,39 @@ final class DashboardController
             'target_rate' => $targetRate,
             'achievement_rate' => $achievementRate,
         ];
+    }
+
+    private function fetchMonthlyConversionTarget(int $userId, \PDO $db): float
+    {
+        $defaultTarget = self::MONTHLY_CONVERSION_TARGET;
+
+        try {
+            $stmt = $db->prepare(
+                'SELECT COUNT(*) AS total
+                 FROM INFORMATION_SCHEMA.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE()
+                   AND TABLE_NAME = "settings"
+                   AND COLUMN_NAME = "meta_conversao_mensal"'
+            );
+            $stmt->execute();
+            $row = $stmt->fetch() ?: [];
+            if ((int) ($row['total'] ?? 0) <= 0) {
+                return $defaultTarget;
+            }
+
+            $settingsStmt = $db->prepare('SELECT meta_conversao_mensal FROM settings WHERE user_id = :uid LIMIT 1');
+            $settingsStmt->execute(['uid' => $userId]);
+            $settings = $settingsStmt->fetch() ?: [];
+
+            return (float) ($settings['meta_conversao_mensal'] ?? $defaultTarget);
+        } catch (Throwable $e) {
+            AppLogger::error('Dashboard conversion target fallback', [
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $defaultTarget;
+        }
     }
 }
 
