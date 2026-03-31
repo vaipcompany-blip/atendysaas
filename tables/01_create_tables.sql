@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS users (
+ï»¿CREATE TABLE IF NOT EXISTS users (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     email VARCHAR(150) NOT NULL,
     cpf VARCHAR(14) NOT NULL,
@@ -107,7 +107,7 @@ VALUES (
     'admin@atendy.local',
     '11122233344',
     '$2y$10$XNZTD8MW8mSjVh4d/wGbWuufw.fPq2kMxLLZaUFeM0WqRjGVLkoB6',
-    'Clínica Atendy Demo',
+    'Clinica Atendy Demo',
     '(11) 90000-0000',
     'Rua Exemplo, 100',
     1
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 ) ENGINE=InnoDB;
 
 INSERT INTO settings (user_id, horario_abertura, horario_fechamento, duracao_consulta, intervalo, mensagem_confirmacao, whatsapp_mode, whatsapp_api_url, whatsapp_verify_token, whatsapp_default_country, meta_conversao_mensal)
-SELECT id, '08:00:00', '18:00:00', 60, 10, 'Olá! Sua consulta é amanhã. Você confirma?', 'mock', 'https://graph.facebook.com/v20.0', 'atendy_verify_token', '55', 60.00
+SELECT id, '08:00:00', '18:00:00', 60, 10, 'Ola! Sua consulta e amanha. Voce confirma?', 'mock', 'https://graph.facebook.com/v20.0', 'atendy_verify_token', '55', 60.00
 FROM users
 WHERE email = 'admin@atendy.local'
 ON DUPLICATE KEY UPDATE updated_at = NOW();
