@@ -158,11 +158,68 @@ final class MigrationRunner
                 if ($trimmed === '') {
                     continue;
                 }
-                $db->exec($statement);
+
+                $compatibleStatement = $this->normalizeSqlForCompatibility($trimmed);
+                if ($compatibleStatement === '') {
+                    continue;
+                }
+
+                try {
+                    $db->exec($compatibleStatement);
+                } catch (Throwable $e) {
+                    if ($this->isIgnorableMigrationError($compatibleStatement, $e)) {
+                        continue;
+                    }
+
+                    throw $e;
+                }
             }
         } catch (Throwable $e) {
             throw new RuntimeException('Falha ao aplicar migration ' . basename($filePath) . ': ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    private function normalizeSqlForCompatibility(string $statement): string
+    {
+        $normalized = $statement;
+
+        // Managed MySQL variants may not support these clauses on ALTER statements.
+        $normalized = preg_replace('/\bADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\b/i', 'ADD COLUMN', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\bADD\s+UNIQUE\s+KEY\s+IF\s+NOT\s+EXISTS\b/i', 'ADD UNIQUE KEY', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\bADD\s+INDEX\s+IF\s+NOT\s+EXISTS\b/i', 'ADD INDEX', $normalized) ?? $normalized;
+
+        return trim($normalized);
+    }
+
+    private function isIgnorableMigrationError(string $statement, Throwable $e): bool
+    {
+        $message = strtoupper($e->getMessage());
+        $normalizedStatement = strtoupper($statement);
+
+        $isAlterAdd = str_contains($normalizedStatement, 'ALTER TABLE') && str_contains($normalizedStatement, ' ADD ');
+        if (!$isAlterAdd) {
+            return false;
+        }
+
+        $ignorableNeedles = [
+            'SQLSTATE[42S21]', // Column already exists
+            'SQLSTATE[42000]', // Generic syntax/constraint errors (used with duplicate key name too)
+            'SQLSTATE[23000]', // Integrity constraint violation
+            'DUPLICATE COLUMN NAME',
+            'DUPLICATE KEY NAME',
+            'ALREADY EXISTS',
+            '1060', // ER_DUP_FIELDNAME
+            '1061', // ER_DUP_KEYNAME
+            '1831', // Duplicate index/constraint variants on some engines
+        ];
+
+        foreach ($ignorableNeedles as $needle) {
+            if (str_contains($message, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function recordMigration(PDO $db, string $fileName, string $checksum): void
