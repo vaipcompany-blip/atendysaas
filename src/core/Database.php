@@ -31,16 +31,16 @@ final class Database
 
     public static function databaseName(): string
     {
-        return (string) env('DB_DATABASE', 'atendy');
+        return self::firstEnv(['MYSQLDATABASE', 'DB_DATABASE'], 'atendy');
     }
 
     private static function createConnection(bool $withDatabase): PDO
     {
-        $host = self::firstEnv(['DB_HOST', 'MYSQLHOST'], '127.0.0.1');
-        $port = self::firstEnv(['DB_PORT', 'MYSQLPORT'], '3306');
-        $name = self::firstEnv(['DB_DATABASE', 'MYSQLDATABASE'], 'atendy');
-        $user = self::firstEnv(['DB_USERNAME', 'MYSQLUSER'], 'root');
-        $pass = self::firstEnv(['DB_PASSWORD', 'MYSQLPASSWORD'], '');
+        $host = self::firstEnv(['MYSQLHOST', 'DB_HOST'], '127.0.0.1');
+        $port = self::firstEnv(['MYSQLPORT', 'DB_PORT'], '3306');
+        $name = self::firstEnv(['MYSQLDATABASE', 'DB_DATABASE'], 'atendy');
+        $user = self::firstEnv(['MYSQLUSER', 'DB_USERNAME'], 'root');
+        $pass = self::firstEnv(['MYSQLPASSWORD', 'DB_PASSWORD'], '');
 
         // Railway fallback: parse MYSQL_PUBLIC_URL / DATABASE_URL if explicit vars are absent.
         if ($host === '127.0.0.1' || $name === 'atendy') {
