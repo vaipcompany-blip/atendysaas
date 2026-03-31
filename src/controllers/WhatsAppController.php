@@ -20,7 +20,8 @@ final class WhatsAppController
         try {
             $db = Database::connection();
 
-            $stmtPatients = $db->prepare('SELECT id, nome, whatsapp FROM patients WHERE user_id = :user_id AND deleted_at IS NULL ORDER BY nome ASC');
+            $patientActiveClause = $this->columnExists($db, 'patients', 'deleted_at') ? ' AND deleted_at IS NULL' : '';
+            $stmtPatients = $db->prepare('SELECT id, nome, whatsapp FROM patients WHERE user_id = :user_id' . $patientActiveClause . ' ORDER BY nome ASC');
             $stmtPatients->execute(['user_id' => $userId]);
             $patients = $stmtPatients->fetchAll();
 
@@ -90,10 +91,20 @@ final class WhatsAppController
                 'line' => $e->getLine(),
             ]);
 
+            $patients = [];
+            try {
+                $dbFallback = Database::connection();
+                $stmtPatients = $dbFallback->prepare('SELECT id, nome, whatsapp FROM patients WHERE user_id = :user_id ORDER BY nome ASC');
+                $stmtPatients->execute(['user_id' => $userId]);
+                $patients = $stmtPatients->fetchAll();
+            } catch (Throwable $inner) {
+                // Keep empty list when even fallback patient query fails.
+            }
+
             View::render('whatsapp/index', [
-                'patients' => [],
+                'patients' => $patients,
                 'messages' => [],
-                'message' => $message ?: 'Modulo WhatsApp temporariamente indisponivel.',
+                'message' => $message ?: 'WhatsApp com dados parciais no momento. Tente novamente em instantes.',
                 'filters' => $filters,
                 'summary' => [
                     'total' => 0,
@@ -542,6 +553,27 @@ final class WhatsAppController
             'topShare' => $share,
             'message' => sprintf('Status mais frequente: %s (%d de %d | %.1f%%).', $topStatus, $topCount, $total, $share),
         ];
+    }
+
+    private function columnExists(PDO $db, string $table, string $column): bool
+    {
+        try {
+            $stmt = $db->prepare(
+                'SELECT COUNT(*) AS total
+                 FROM INFORMATION_SCHEMA.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE()
+                   AND TABLE_NAME = :table_name
+                   AND COLUMN_NAME = :column_name'
+            );
+            $stmt->execute([
+                'table_name' => $table,
+                'column_name' => $column,
+            ]);
+
+            return (int) ($stmt->fetch()['total'] ?? 0) > 0;
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 }
 

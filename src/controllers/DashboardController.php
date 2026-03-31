@@ -21,6 +21,7 @@ final class DashboardController
 
         try {
             $db = Database::connection();
+            $patientActiveClause = $this->columnExists($db, 'patients', 'deleted_at') ? ' AND deleted_at IS NULL' : '';
 
         // �"?�"? Período selecionado �"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?
         $period = (string) ($_GET['period'] ?? '30d');
@@ -31,12 +32,12 @@ final class DashboardController
         [$dateFrom, $dateTo] = $this->periodRange($period);
 
         // �"?�"? Total de pacientes (sem filtro de período) �"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?
-        $stmt = $db->prepare('SELECT COUNT(*) AS total FROM patients WHERE user_id = :uid AND deleted_at IS NULL');
+        $stmt = $db->prepare('SELECT COUNT(*) AS total FROM patients WHERE user_id = :uid' . $patientActiveClause);
         $stmt->execute(['uid' => $userId]);
         $totalPatients = (int) ($stmt->fetch()['total'] ?? 0);
 
         // �"?�"? Leads ativos no período �"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?
-        $stmt = $db->prepare('SELECT COUNT(*) AS total FROM patients WHERE user_id = :uid AND status = "lead" AND deleted_at IS NULL AND created_at BETWEEN :from AND :to');
+        $stmt = $db->prepare('SELECT COUNT(*) AS total FROM patients WHERE user_id = :uid AND status = "lead"' . $patientActiveClause . ' AND created_at BETWEEN :from AND :to');
         $stmt->execute(['uid' => $userId, 'from' => $dateFrom, 'to' => $dateTo]);
         $newLeads = (int) ($stmt->fetch()['total'] ?? 0);
 
@@ -80,9 +81,9 @@ final class DashboardController
         $weeklyData        = $this->weeklyAppointments($userId, $dateFrom, $dateTo, $db);
         $statusDistribution= $this->statusDistribution($userId, $dateFrom, $dateTo, $db);
         $dailyMessages     = $this->dailyMessages($userId, $dateFrom, $dateTo, $db);
-        $leadPipeline      = $this->leadPipeline($userId, $dateFrom, $dateTo, $db);
+        $leadPipeline      = $this->leadPipeline($userId, $dateFrom, $dateTo, $db, $patientActiveClause);
         $patientPerformance = $this->patientPerformance($userId, $dateFrom, $dateTo, $db);
-        $monthlyConversionGoal = $this->monthlyConversionGoal($userId, $db);
+        $monthlyConversionGoal = $this->monthlyConversionGoal($userId, $db, $patientActiveClause);
 
         // Próximas consultas (agenda do dia e amanhã)
         $upcomingAppointments = $this->upcomingAppointments($userId, $db);
@@ -121,7 +122,58 @@ final class DashboardController
                 'line' => $e->getLine(),
             ]);
 
-            redirect(base_url('route=patients&message=' . urlencode('Painel temporariamente indisponivel.')));
+            $period = (string) ($_GET['period'] ?? '30d');
+            if (!array_key_exists($period, self::PERIODS)) {
+                $period = '30d';
+            }
+            [$dateFrom, $dateTo] = $this->periodRange($period);
+
+            View::render('dashboard', [
+                'user'                 => $user,
+                'period'               => $period,
+                'periods'              => self::PERIODS,
+                'dateFrom'             => $dateFrom,
+                'dateTo'               => $dateTo,
+                'totalPatients'        => 0,
+                'newLeads'             => 0,
+                'totalAppointments'    => 0,
+                'confirmed'            => 0,
+                'noShow'               => 0,
+                'cancelled'            => 0,
+                'confirmationRate'     => 0.0,
+                'noShowRate'           => 0.0,
+                'cancellationRate'     => 0.0,
+                'messagesSent'         => 0,
+                'messagesReceived'     => 0,
+                'deliveryRate'         => 0.0,
+                'weeklyData'           => [],
+                'statusDistribution'   => [],
+                'dailyMessages'        => [],
+                'leadPipeline'         => [
+                    'leads' => 0,
+                    'with_appointment' => 0,
+                    'with_confirmation' => 0,
+                    'schedule_rate' => 0.0,
+                    'confirmation_rate' => 0.0,
+                ],
+                'patientPerformance'   => [
+                    'patients_with_appointments' => 0,
+                    'returning_patients' => 0,
+                    'recurrence_rate' => 0.0,
+                    'avg_appointments_per_patient' => 0.0,
+                    'avg_revenue_per_patient' => 0.0,
+                    'top_patients' => [],
+                ],
+                'monthlyConversionGoal'=> [
+                    'month_label' => date('m/Y'),
+                    'leads' => 0,
+                    'confirmed' => 0,
+                    'conversion_rate' => 0.0,
+                    'target_rate' => self::MONTHLY_CONVERSION_TARGET,
+                    'achievement_rate' => 0.0,
+                ],
+                'upcomingAppointments' => [],
+            ]);
         }
     }
 
@@ -231,13 +283,13 @@ final class DashboardController
      * Funil comercial de leads no período selecionado.
      * @return array{leads:int, with_appointment:int, with_confirmation:int, schedule_rate:float, confirmation_rate:float}
      */
-    private function leadPipeline(int $userId, string $from, string $to, \PDO $db): array
+    private function leadPipeline(int $userId, string $from, string $to, \PDO $db, string $patientActiveClause): array
     {
         $stmt = $db->prepare(
             'SELECT COUNT(*) AS total
              FROM patients
              WHERE user_id = :uid
-               AND deleted_at IS NULL
+               ' . $patientActiveClause . '
                AND status = "lead"
                AND created_at BETWEEN :from AND :to'
         );
@@ -249,7 +301,7 @@ final class DashboardController
              FROM patients p
              INNER JOIN appointments a ON a.patient_id = p.id AND a.user_id = :uid
              WHERE p.user_id = :uid
-               AND p.deleted_at IS NULL
+                             ' . str_replace('deleted_at', 'p.deleted_at', $patientActiveClause) . '
                AND p.status = "lead"
                AND p.created_at BETWEEN :from AND :to'
         );
@@ -261,7 +313,7 @@ final class DashboardController
              FROM patients p
              INNER JOIN appointments a ON a.patient_id = p.id AND a.user_id = :uid
              WHERE p.user_id = :uid
-               AND p.deleted_at IS NULL
+                             ' . str_replace('deleted_at', 'p.deleted_at', $patientActiveClause) . '
                AND p.status = "lead"
                AND p.created_at BETWEEN :from AND :to
                AND a.status IN ("confirmada", "realizada")'
@@ -379,7 +431,7 @@ final class DashboardController
      * Meta mensal de conversão de leads para confirmação/realização.
      * @return array{month_label:string, leads:int, confirmed:int, conversion_rate:float, target_rate:float, achievement_rate:float}
      */
-    private function monthlyConversionGoal(int $userId, \PDO $db): array
+    private function monthlyConversionGoal(int $userId, \PDO $db, string $patientActiveClause): array
     {
         $monthStart = (new DateTime('first day of this month'))->format('Y-m-d 00:00:00');
         $monthEnd = (new DateTime('last day of this month'))->format('Y-m-d 23:59:59');
@@ -389,7 +441,7 @@ final class DashboardController
             'SELECT COUNT(*) AS total
              FROM patients
              WHERE user_id = :uid
-               AND deleted_at IS NULL
+             ' . $patientActiveClause . '
                AND status = "lead"
                AND created_at BETWEEN :from AND :to'
         );
@@ -401,7 +453,7 @@ final class DashboardController
              FROM patients p
              INNER JOIN appointments a ON a.patient_id = p.id AND a.user_id = :uid
              WHERE p.user_id = :uid
-               AND p.deleted_at IS NULL
+                             ' . str_replace('deleted_at', 'p.deleted_at', $patientActiveClause) . '
                AND p.status = "lead"
                AND p.created_at BETWEEN :from AND :to
                AND a.status IN ("confirmada", "realizada")'
@@ -455,6 +507,27 @@ final class DashboardController
             ]);
 
             return $defaultTarget;
+        }
+    }
+
+    private function columnExists(\PDO $db, string $table, string $column): bool
+    {
+        try {
+            $stmt = $db->prepare(
+                'SELECT COUNT(*) AS total
+                 FROM INFORMATION_SCHEMA.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE()
+                   AND TABLE_NAME = :table_name
+                   AND COLUMN_NAME = :column_name'
+            );
+            $stmt->execute([
+                'table_name' => $table,
+                'column_name' => $column,
+            ]);
+
+            return (int) ($stmt->fetch()['total'] ?? 0) > 0;
+        } catch (Throwable $e) {
+            return false;
         }
     }
 }
