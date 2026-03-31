@@ -32,6 +32,7 @@
 
         .app-shell{min-height:100vh;display:flex;transition:.2s ease}
         .sidebar{width:var(--sidebar-w);background:linear-gradient(180deg,#0f172a 0%,#132036 100%);color:#cbd5e1;padding:18px 14px;position:sticky;top:0;height:100vh;border-right:1px solid rgba(255,255,255,.08);transition:width .22s ease,padding .22s ease}
+        .sidebar-backdrop{display:none}
         .sidebar-brand{display:flex;align-items:center;gap:10px;padding:8px 10px 14px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:14px;white-space:nowrap;overflow:hidden}
         .sidebar-brand strong{font-size:18px;color:#fff}
         .sidebar-nav{display:flex;flex-direction:column;gap:6px}
@@ -102,20 +103,39 @@
         form.inline{display:inline-flex;gap:8px;align-items:center}
 
         @media (max-width:980px){
-            .app-shell{display:block}
-            .sidebar{position:relative;width:100%;height:auto;padding:12px 12px 6px;border-right:none}
-            .app-shell.sidebar-collapsed .sidebar{width:100%;padding:12px 12px 6px}
+            .app-shell{display:flex}
+            .sidebar{
+                position:fixed;
+                top:0;
+                left:0;
+                width:min(84vw,320px);
+                height:100vh;
+                z-index:1200;
+                border-right:1px solid rgba(255,255,255,.08);
+                transform:translateX(-105%);
+                transition:transform .22s ease;
+                box-shadow:0 18px 34px rgba(0,0,0,.28);
+            }
+            .app-shell.sidebar-open .sidebar{transform:translateX(0)}
+            .sidebar-backdrop{
+                position:fixed;
+                inset:0;
+                background:rgba(15,23,42,.5);
+                z-index:1100;
+            }
+            .app-shell.sidebar-open .sidebar-backdrop{display:block}
             .sidebar-brand{margin-bottom:10px}
-            .sidebar-nav{flex-direction:row;flex-wrap:wrap}
-            .sidebar-footer{position:static;margin-top:10px}
+            .sidebar-nav{flex-direction:column;flex-wrap:nowrap}
+            .sidebar-footer{position:absolute;margin-top:0}
             .app-shell.sidebar-collapsed .sidebar-brand strong,
             .app-shell.sidebar-collapsed .sidebar-footer,
             .app-shell.sidebar-collapsed .sidebar-nav a .nav-label{opacity:1;transform:none;pointer-events:auto}
             .app-shell.sidebar-collapsed .sidebar-nav a{justify-content:flex-start;padding-left:10px;padding-right:12px}
-            .top-header{position:relative;height:auto;padding:12px 16px}
+            .main-area{width:100%}
+            .top-header{position:sticky;height:64px;padding:0 14px;top:0;z-index:1050}
             .container{margin:18px auto;padding:0 14px}
             .page-title{font-size:26px}
-            .sidebar-toggle{display:none}
+            .sidebar-toggle{display:inline-flex}
         }
     </style>
 </head>
@@ -156,6 +176,7 @@ if ($sessionDisplayName === '' || strpos($sessionDisplayName, '??') !== false ||
 
         <div class="sidebar-footer">Visual organizado · azul e cinza</div>
     </aside>
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
     <div class="main-area">
         <div class="top-header">
@@ -189,21 +210,92 @@ if ($sessionDisplayName === '' || strpos($sessionDisplayName, '??') !== false ||
         (function () {
             var shell = document.getElementById('appShell');
             var toggle = document.getElementById('sidebarToggle');
+            var backdrop = document.getElementById('sidebarBackdrop');
             if (!shell || !toggle) return;
 
             var storageKey = 'atendy_sidebar_collapsed';
-            try {
-                if (window.localStorage.getItem(storageKey) === '1') {
-                    shell.classList.add('sidebar-collapsed');
+            var mobileQuery = window.matchMedia('(max-width: 980px)');
+
+            function isMobile() {
+                return mobileQuery.matches;
+            }
+
+            function closeMobileMenu() {
+                shell.classList.remove('sidebar-open');
+                document.body.style.overflow = '';
+            }
+
+            function openMobileMenu() {
+                shell.classList.add('sidebar-open');
+                document.body.style.overflow = 'hidden';
+            }
+
+            function restoreDesktopState() {
+                closeMobileMenu();
+                try {
+                    if (window.localStorage.getItem(storageKey) === '1') {
+                        shell.classList.add('sidebar-collapsed');
+                    } else {
+                        shell.classList.remove('sidebar-collapsed');
+                    }
+                } catch (e) {
+                    shell.classList.remove('sidebar-collapsed');
                 }
-            } catch (e) {}
+            }
+
+            function prepareMobileState() {
+                shell.classList.remove('sidebar-collapsed');
+                closeMobileMenu();
+            }
+
+            if (isMobile()) {
+                prepareMobileState();
+            } else {
+                restoreDesktopState();
+            }
 
             toggle.addEventListener('click', function () {
+                if (isMobile()) {
+                    if (shell.classList.contains('sidebar-open')) {
+                        closeMobileMenu();
+                    } else {
+                        openMobileMenu();
+                    }
+                    return;
+                }
+
                 shell.classList.toggle('sidebar-collapsed');
                 try {
                     window.localStorage.setItem(storageKey, shell.classList.contains('sidebar-collapsed') ? '1' : '0');
                 } catch (e) {}
             });
+
+            if (backdrop) {
+                backdrop.addEventListener('click', closeMobileMenu);
+            }
+
+            var navLinks = shell.querySelectorAll('.sidebar-nav a');
+            Array.prototype.forEach.call(navLinks, function (link) {
+                link.addEventListener('click', function () {
+                    if (isMobile()) {
+                        closeMobileMenu();
+                    }
+                });
+            });
+
+            function handleViewportChange() {
+                if (isMobile()) {
+                    prepareMobileState();
+                } else {
+                    restoreDesktopState();
+                }
+            }
+
+            if (typeof mobileQuery.addEventListener === 'function') {
+                mobileQuery.addEventListener('change', handleViewportChange);
+            } else if (typeof mobileQuery.addListener === 'function') {
+                mobileQuery.addListener(handleViewportChange);
+            }
         }());
         </script>
 
