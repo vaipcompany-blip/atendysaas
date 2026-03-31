@@ -307,6 +307,11 @@ function billing_route_is_exempt(string $route): bool
 
 function ensure_subscription_access(string $route, string $method = 'GET', string $action = ''): void
 {
+    // Emergency safety valve: keep app usable even if billing tables are inconsistent.
+    if (!env_bool('BILLING_ENFORCE_ACCESS', false)) {
+        return;
+    }
+
     if (billing_route_is_exempt($route)) {
         return;
     }
@@ -321,8 +326,20 @@ function ensure_subscription_access(string $route, string $method = 'GET', strin
         return;
     }
 
-    $billing = new BillingService();
-    $allowed = $billing->isWorkspaceAccessAllowed($workspaceId);
+    try {
+        $billing = new BillingService();
+        $allowed = $billing->isWorkspaceAccessAllowed($workspaceId);
+    } catch (Throwable $e) {
+        AppLogger::error('Billing access check failed', [
+            'workspace_id' => $workspaceId,
+            'route' => $route,
+            'method' => $method,
+            'action' => $action,
+            'error' => $e->getMessage(),
+        ]);
+        return;
+    }
+
     if ($allowed) {
         return;
     }

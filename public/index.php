@@ -113,6 +113,7 @@ if ($method === 'POST') {
 ensure_route_access($route, $method, $routeAction);
 ensure_subscription_access($route, $method, $routeAction);
 
+try {
 switch ($route) {
     case 'logout':
         $authController->logout();
@@ -338,4 +339,21 @@ switch ($route) {
     default:
         require_once dirname(__DIR__) . '/src/views/errors/404.php';
         break;
+}
+} catch (Throwable $e) {
+    AppLogger::error('Unhandled route exception', [
+        'route' => $route,
+        'method' => $method,
+        'action' => $routeAction,
+        'message' => $e->getMessage(),
+        'file' => $e->getFile(),
+        'line' => $e->getLine(),
+    ]);
+
+    if (!headers_sent()) {
+        redirect(base_url('route=login&error=' . urlencode('Falha interna temporaria. Tente novamente.')));
+    }
+
+    http_response_code(500);
+    echo 'Erro interno do servidor.';
 }
