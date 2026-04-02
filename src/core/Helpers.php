@@ -129,6 +129,17 @@ function auth_allowed_roles_for_route(string $route, string $method = 'GET', str
         'appointments' => ['owner', 'admin', 'staff'],
         'whatsapp' => ['owner', 'admin', 'staff'],
         'billing' => ['owner'],
+        'pricing' => ['owner'],
+        'billing_result' => ['owner'],
+        'billing_success' => ['owner'],
+        'billing_failure' => ['owner'],
+        'billing_pending' => ['owner'],
+        'checkout' => ['owner'],
+        'renew_subscription' => ['owner'],
+        'my_subscription' => ['owner'],
+        'api_checkout' => ['owner'],
+        'api_renew_subscription' => ['owner'],
+        'api_me_subscription' => ['owner'],
         'notifications' => ['owner', 'admin', 'staff'],
         'financeiro' => ['owner', 'admin'],
         'reports' => ['owner', 'admin'],
@@ -206,6 +217,8 @@ function auth_allowed_roles_for_action(string $route, string $method = 'GET', st
             'POST' => [
                 'activate_plan' => ['owner'],
                 'cancel_subscription' => ['owner'],
+                'checkout' => ['owner'],
+                'renew_subscription' => ['owner'],
             ],
         ],
         'team' => [
@@ -247,6 +260,10 @@ function auth_can_access_route(string $route, string $method = 'GET', string $ac
 function auth_request_expects_json(string $route, string $method = 'GET', string $action = ''): bool
 {
     $method = strtoupper($method);
+    if (in_array($route, ['api_checkout', 'api_renew_subscription', 'api_me_subscription', 'api_plans'], true)) {
+        return true;
+    }
+
     if ($method !== 'POST') {
         return false;
     }
@@ -302,13 +319,13 @@ function ensure_route_access(string $route, string $method = 'GET', string $acti
 
 function billing_route_is_exempt(string $route): bool
 {
-    return in_array($route, ['billing', 'logout', 'health', 'calendar_feed', 'whatsapp_webhook'], true);
+    return in_array($route, ['billing', 'pricing', 'checkout', 'renew_subscription', 'billing_result', 'billing_success', 'billing_failure', 'billing_pending', 'my_subscription', 'api_checkout', 'api_renew_subscription', 'api_me_subscription', 'api_plans', 'logout', 'health', 'calendar_feed', 'whatsapp_webhook', 'mercadopago_webhook', 'plans'], true);
 }
 
 function ensure_subscription_access(string $route, string $method = 'GET', string $action = ''): void
 {
     // Emergency safety valve: keep app usable even if billing tables are inconsistent.
-    if (!env_bool('BILLING_ENFORCE_ACCESS', false)) {
+    if (!env_bool('BILLING_ENFORCE_ACCESS', true)) {
         return;
     }
 
@@ -344,9 +361,10 @@ function ensure_subscription_access(string $route, string $method = 'GET', strin
         return;
     }
 
-    $message = 'Sua assinatura está inativa. Atualize o plano para continuar usando o Atendy.';
+    $decision = $billing->getAccessDecision($workspaceId);
+    $message = (string) ($decision['message'] ?? 'Assinatura necessaria. Escolha um plano.');
     if (auth_request_expects_json($route, $method, $action)) {
-        http_response_code(402);
+        http_response_code(403);
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode([
             'success' => false,
@@ -355,7 +373,7 @@ function ensure_subscription_access(string $route, string $method = 'GET', strin
         exit;
     }
 
-    redirect(base_url('route=billing&message=' . urlencode($message)));
+    redirect(base_url('route=pricing&message=' . urlencode($message)));
 }
 
 function audit_log_event(?int $userId, string $eventType, string $details): void

@@ -57,6 +57,7 @@ require_once __DIR__ . '/core/MigrationRunner.php';
 require_once __DIR__ . '/core/AutomationJobRunner.php';
 require_once __DIR__ . '/core/ObservabilityService.php';
 require_once __DIR__ . '/core/LegalService.php';
+require_once __DIR__ . '/core/MercadoPagoClient.php';
 require_once __DIR__ . '/core/Auth.php';
 require_once __DIR__ . '/core/View.php';
 require_once __DIR__ . '/core/MailerService.php';

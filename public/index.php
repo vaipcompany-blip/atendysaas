@@ -4,7 +4,37 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/src/bootstrap.php';
 
-$route = $_GET['route'] ?? 'dashboard';
+$route = (string) ($_GET['route'] ?? '');
+$requestUriPath = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+$scriptName = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+$scriptDir = rtrim(str_replace('\\', '/', dirname($scriptName)), '/');
+if ($scriptDir === '.') {
+    $scriptDir = '';
+}
+
+$normalizedPath = $requestUriPath;
+if ($scriptDir !== '' && strpos($normalizedPath, $scriptDir . '/') === 0) {
+    $normalizedPath = substr($normalizedPath, strlen($scriptDir));
+}
+if ($normalizedPath === '') {
+    $normalizedPath = '/';
+}
+
+if ($route === '') {
+    $pathRouteMap = [
+        '/api/plans' => 'api_plans',
+        '/api/checkout' => 'api_checkout',
+        '/api/renew-subscription' => 'api_renew_subscription',
+        '/api/me/subscription' => 'api_me_subscription',
+        '/webhook/mercadopago' => 'mercadopago_webhook',
+        '/pricing' => 'pricing',
+        '/success' => 'billing_success',
+        '/failure' => 'billing_failure',
+        '/pending' => 'billing_pending',
+    ];
+    $route = $pathRouteMap[$normalizedPath] ?? 'dashboard';
+}
+
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 $authController = new AuthController();
@@ -96,6 +126,39 @@ if ($route === 'whatsapp_webhook') {
 
     http_response_code(405);
     echo 'Method not allowed';
+    exit;
+}
+
+if ($route === 'mercadopago_webhook') {
+    if ($method === 'POST') {
+        $billingController->webhookMercadoPago();
+        exit;
+    }
+
+    http_response_code(405);
+    echo 'Method not allowed';
+    exit;
+}
+
+if ($route === 'plans') {
+    if ($method !== 'GET') {
+        http_response_code(405);
+        echo 'Method not allowed';
+        exit;
+    }
+
+    $billingController->plansJson();
+    exit;
+}
+
+if ($route === 'api_plans') {
+    if ($method !== 'GET') {
+        http_response_code(405);
+        echo 'Method not allowed';
+        exit;
+    }
+
+    $billingController->plansJson();
     exit;
 }
 
@@ -216,6 +279,94 @@ switch ($route) {
             $billingController->save();
         }
         $billingController->index();
+        break;
+
+    case 'pricing':
+        if ($method === 'POST') {
+            $billingController->save();
+        }
+        $billingController->index();
+        break;
+
+    case 'checkout':
+        if ($method !== 'POST') {
+            http_response_code(405);
+            echo 'Method not allowed';
+            break;
+        }
+        $billingController->checkout();
+        break;
+
+    case 'renew_subscription':
+        if ($method !== 'POST') {
+            http_response_code(405);
+            echo 'Method not allowed';
+            break;
+        }
+        $billingController->renewSubscription();
+        break;
+
+    case 'api_checkout':
+        if ($method !== 'POST') {
+            http_response_code(405);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['message' => 'Method not allowed'], JSON_UNESCAPED_UNICODE);
+            break;
+        }
+        $billingController->checkoutJson();
+        break;
+
+    case 'api_renew_subscription':
+        if ($method !== 'POST') {
+            http_response_code(405);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['message' => 'Method not allowed'], JSON_UNESCAPED_UNICODE);
+            break;
+        }
+        $billingController->renewSubscriptionJson();
+        break;
+
+    case 'billing_result':
+        if ($method !== 'GET') {
+            http_response_code(405);
+            echo 'Method not allowed';
+            break;
+        }
+        $billingController->checkoutResult();
+        break;
+
+    case 'my_subscription':
+        if ($method !== 'GET') {
+            http_response_code(405);
+            echo 'Method not allowed';
+            break;
+        }
+        $billingController->meSubscriptionJson();
+        break;
+
+    case 'api_me_subscription':
+        if ($method !== 'GET') {
+            http_response_code(405);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['message' => 'Method not allowed'], JSON_UNESCAPED_UNICODE);
+            break;
+        }
+        $billingController->meSubscriptionJson();
+        break;
+
+    case 'billing_success':
+        $_GET['status'] = 'success';
+        $billingController->checkoutResult();
+        break;
+
+    case 'billing_failure':
+        $_GET['status'] = 'failure';
+        $billingController->checkoutResult();
+        break;
+
+    case 'billing_pending':
+        $_GET['status'] = 'pending';
+        $billingController->checkoutResult();
         break;
 
     case 'calendar':

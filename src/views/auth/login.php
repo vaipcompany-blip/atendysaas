@@ -1,4 +1,5 @@
-<div class="card" style="max-width:440px;margin:48px auto;">
+<div class="auth-login-shell">
+<div class="card login-card">
     <h2 class="page-title" style="font-size:26px;">Entrar no Atendy</h2>
     <p class="muted">Use e-mail ou CPF e sua senha.</p>
 
@@ -28,6 +29,7 @@
     </div>
 
     <p class="muted" style="margin-top:12px;">Primeiro acesso? Cadastre a clínica para criar o ambiente.</p>
+</div>
 </div>
 
 

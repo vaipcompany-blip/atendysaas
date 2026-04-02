@@ -4,153 +4,412 @@ declare(strict_types=1);
 
 final class BillingService
 {
+    /** @var array<string, array{name:string,price:float,duration_days:int,duration_label:string,save:?string}> */
+    private const PLAN_CATALOG = [
+        'monthly' => [
+            'name' => 'Mensal',
+            'price' => 29.99,
+            'duration_days' => 30,
+            'duration_label' => '1 mes',
+            'save' => null,
+        ],
+        'quarterly' => [
+            'name' => 'Trimestral',
+            'price' => 79.99,
+            'duration_days' => 90,
+            'duration_label' => '3 meses',
+            'save' => '11%',
+        ],
+        'annual' => [
+            'name' => 'Anual',
+            'price' => 339.99,
+            'duration_days' => 365,
+            'duration_label' => '12 meses',
+            'save' => '6%',
+        ],
+    ];
+
     public function getPlans(): array
     {
-        $stmt = Database::connection()->query(
-            'SELECT id, code, name, description, price_cents, currency, interval_months, max_team_members, max_monthly_messages, is_active
-             FROM billing_plans
-             WHERE is_active = 1
-             ORDER BY price_cents ASC, id ASC'
-        );
+        $result = [];
+        foreach (self::PLAN_CATALOG as $id => $plan) {
+            $result[] = [
+                'id' => $id,
+                'code' => $id,
+                'name' => (string) $plan['name'],
+                'price' => (float) $plan['price'],
+                'price_cents' => (int) round(((float) $plan['price']) * 100),
+                'currency' => 'BRL',
+                'duration' => (string) $plan['duration_label'],
+                'duration_days' => (int) $plan['duration_days'],
+                'durationDays' => (int) $plan['duration_days'],
+                'save' => $plan['save'],
+                'description' => 'Acesso total ao SaaS, todas as features, suporte por email e atualizacoes.',
+            ];
+        }
 
-        return $stmt ? $stmt->fetchAll() : [];
+        return $result;
     }
 
     public function getCurrentSubscription(int $userId): ?array
     {
         $stmt = Database::connection()->prepare(
-            'SELECT s.id, s.user_id, s.plan_id, s.status, s.started_at, s.trial_ends_at, s.current_period_end, s.canceled_at,
+            'SELECT s.id, s.external_uuid, s.user_id, s.plan_id, s.plan_type, s.status, s.payment_status,
+                    s.amount, s.duration_days, s.start_date, s.end_date,
+                    s.started_at, s.trial_ends_at, s.current_period_end, s.canceled_at,
                     s.payment_provider, s.payment_reference,
+                    s.mercadopago_preference_id, s.mercadopago_payment_id,
+                    s.created_at, s.updated_at,
                     p.code AS plan_code, p.name AS plan_name, p.description AS plan_description,
                     p.price_cents, p.currency, p.interval_months, p.max_team_members, p.max_monthly_messages
              FROM subscriptions s
-             INNER JOIN billing_plans p ON p.id = s.plan_id
+             LEFT JOIN billing_plans p ON p.id = s.plan_id
              WHERE s.user_id = :user_id
              LIMIT 1'
         );
         $stmt->execute(['user_id' => $userId]);
         $row = $stmt->fetch();
 
-        return $row ?: null;
+        if (!$row) {
+            return null;
+        }
+
+        $planType = (string) ($row['plan_type'] ?? '');
+        if ($planType === '') {
+            $planType = (string) ($row['plan_code'] ?? 'monthly');
+        }
+        if (!isset(self::PLAN_CATALOG[$planType])) {
+            $planType = 'monthly';
+        }
+
+        $plan = self::PLAN_CATALOG[$planType];
+        $amount = (float) ($row['amount'] ?? 0);
+        if ($amount <= 0) {
+            $amount = (float) $plan['price'];
+        }
+
+        $durationDays = (int) ($row['duration_days'] ?? 0);
+        if ($durationDays <= 0) {
+            $durationDays = (int) $plan['duration_days'];
+        }
+
+        $endDate = (string) ($row['end_date'] ?? $row['current_period_end'] ?? '');
+        $daysRemaining = $this->daysRemaining($endDate);
+        $normalizedStatus = $this->normalizeSubscriptionStatus($row, $daysRemaining);
+
+        $row['plan_type'] = $planType;
+        $row['amount'] = $amount;
+        $row['duration_days'] = $durationDays;
+        $row['duration'] = (string) $plan['duration_label'];
+        $row['save'] = $plan['save'];
+        $row['status_normalized'] = $normalizedStatus;
+        $row['days_remaining'] = $daysRemaining;
+
+        return $row;
     }
 
     public function ensureWorkspaceSubscription(int $userId): array
     {
         $existing = $this->getCurrentSubscription($userId);
         if ($existing !== null) {
-            $this->refreshSubscriptionState((int) $existing['id']);
-            return $this->getCurrentSubscription($userId) ?? $existing;
+            return $existing;
         }
 
-        $plan = $this->findDefaultPlan();
-        if ($plan === null) {
-            throw new RuntimeException('Nenhum plano de billing ativo foi encontrado.');
+        return [];
+    }
+
+    public function getAccessDecision(int $userId): array
+    {
+        $subscription = $this->getCurrentSubscription($userId);
+        if ($subscription === null) {
+            return [
+                'allowed' => false,
+                'reason' => 'no_subscription',
+                'message' => 'Assinatura necessaria. Escolha um plano.',
+                'subscription' => null,
+            ];
         }
 
-        $trialDays = $this->trialDays();
-        $status = $trialDays > 0 ? 'trialing' : 'active';
-        $trialEndsAt = $trialDays > 0 ? date('Y-m-d H:i:s', strtotime('+' . $trialDays . ' days')) : null;
-        $periodEnd = $status === 'active'
-            ? date('Y-m-d H:i:s', strtotime('+' . max(1, (int) $plan['interval_months']) . ' month'))
-            : $trialEndsAt;
+        $paymentStatus = mb_strtolower(trim((string) ($subscription['payment_status'] ?? 'pending')), 'UTF-8');
+        if ($paymentStatus !== 'approved') {
+            return [
+                'allowed' => false,
+                'reason' => 'pending_payment',
+                'message' => 'Pagamento pendente.',
+                'subscription' => $subscription,
+            ];
+        }
 
-        $stmt = Database::connection()->prepare(
-            'INSERT INTO subscriptions (
-                user_id, plan_id, status, started_at, trial_ends_at, current_period_end, created_at, updated_at
-             ) VALUES (
-                :user_id, :plan_id, :status, NOW(), :trial_ends_at, :current_period_end, NOW(), NOW()
-             )'
-        );
-        $stmt->execute([
-            'user_id' => $userId,
-            'plan_id' => (int) $plan['id'],
-            'status' => $status,
-            'trial_ends_at' => $trialEndsAt,
-            'current_period_end' => $periodEnd,
-        ]);
+        $endDate = (string) ($subscription['end_date'] ?? $subscription['current_period_end'] ?? '');
+        if ($endDate === '' || strtotime($endDate) === false || strtotime($endDate) < time()) {
+            return [
+                'allowed' => false,
+                'reason' => 'expired',
+                'message' => 'Assinatura expirada. Renove agora.',
+                'subscription' => $subscription,
+            ];
+        }
 
-        $subscriptionId = (int) Database::connection()->lastInsertId();
-        $this->recordBillingEvent(
-            $subscriptionId,
-            $userId,
-            $status === 'trialing' ? 'trial_started' : 'subscription_started',
-            'success',
-            0,
-            (string) ($plan['currency'] ?? 'BRL'),
-            null,
-            ['plan_code' => (string) $plan['code']]
-        );
-
-        return $this->getCurrentSubscription($userId) ?? [];
+        return [
+            'allowed' => true,
+            'reason' => 'active',
+            'message' => '',
+            'subscription' => $subscription,
+        ];
     }
 
     public function isWorkspaceAccessAllowed(int $userId): bool
     {
-        $subscription = $this->ensureWorkspaceSubscription($userId);
-        $status = (string) ($subscription['status'] ?? 'past_due');
-
-        if ($status === 'active') {
-            return true;
-        }
-
-        if ($status !== 'trialing') {
-            return false;
-        }
-
-        $trialEndsAt = (string) ($subscription['trial_ends_at'] ?? '');
-        if ($trialEndsAt === '' || strtotime($trialEndsAt) === false) {
-            return false;
-        }
-
-        return strtotime($trialEndsAt) >= time();
+        $decision = $this->getAccessDecision($userId);
+        return (bool) ($decision['allowed'] ?? false);
     }
 
-    public function activatePlan(int $userId, string $planCode, string $paymentReference = 'manual'): array
+    public function createCheckout(int $userId, string $planType): array
     {
-        $plan = $this->findPlanByCode($planCode);
+        $plan = $this->planByType($planType);
         if ($plan === null) {
             throw new RuntimeException('Plano informado não existe ou está inativo.');
         }
 
-        $subscription = $this->ensureWorkspaceSubscription($userId);
-        $subscriptionId = (int) ($subscription['id'] ?? 0);
-        if ($subscriptionId <= 0) {
-            throw new RuntimeException('Não foi possível localizar a assinatura atual.');
+        $db = Database::connection();
+        $db->beginTransaction();
+
+        try {
+            $subscription = $this->upsertPendingSubscription($db, $userId, $planType, $plan);
+
+            $preferencePayload = $this->buildPreferencePayload(
+                $userId,
+                $subscription,
+                $planType,
+                $plan
+            );
+
+            $client = new MercadoPagoClient();
+            $preference = $client->createPreference($preferencePayload);
+
+            $preferenceId = (string) ($preference['id'] ?? '');
+            $preferenceUrl = (string) ($preference['init_point'] ?? $preference['sandbox_init_point'] ?? '');
+            if ($preferenceId === '' || $preferenceUrl === '') {
+                throw new RuntimeException('Nao foi possivel gerar o checkout no Mercado Pago.');
+            }
+
+            $stmt = $db->prepare(
+                'UPDATE subscriptions
+                 SET mercadopago_preference_id = :preference_id,
+                     payment_provider = "mercadopago",
+                     payment_reference = :payment_reference,
+                     updated_at = NOW()
+                 WHERE id = :id AND user_id = :user_id'
+            );
+            $stmt->execute([
+                'preference_id' => $preferenceId,
+                'payment_reference' => $preferenceId,
+                'id' => (int) $subscription['id'],
+                'user_id' => $userId,
+            ]);
+
+            $this->recordBillingEvent(
+                (int) $subscription['id'],
+                $userId,
+                'checkout_created',
+                'pending',
+                (int) round(((float) $plan['price']) * 100),
+                'BRL',
+                $preferenceId,
+                [
+                    'plan_type' => $planType,
+                    'duration_days' => (int) $plan['duration_days'],
+                ]
+            );
+
+            $db->commit();
+
+            return [
+                'subscription_id' => (int) $subscription['id'],
+                'preference_id' => $preferenceId,
+                'preference_url' => $preferenceUrl,
+            ];
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function renewSubscription(int $userId, string $planType): array
+    {
+        return $this->createCheckout($userId, $planType);
+    }
+
+    public function processPaymentWebhook(string $paymentId): array
+    {
+        $paymentId = trim($paymentId);
+        if ($paymentId === '') {
+            throw new RuntimeException('Payment ID ausente no webhook.');
         }
 
-        $intervalMonths = max(1, (int) ($plan['interval_months'] ?? 1));
-        $periodEnd = date('Y-m-d H:i:s', strtotime('+' . $intervalMonths . ' month'));
+        $client = new MercadoPagoClient();
+        $payment = $client->getPayment($paymentId);
+
+        $status = mb_strtolower((string) ($payment['status'] ?? ''), 'UTF-8');
+        $preferenceId = (string) ($payment['order']['id'] ?? '');
+        $externalReference = (string) ($payment['external_reference'] ?? '');
+
+        $subscription = $this->findSubscriptionByProviderReference($preferenceId, $externalReference);
+        if ($subscription === null) {
+            AppLogger::error('Mercado Pago webhook without subscription match', [
+                'payment_id' => $paymentId,
+                'preference_id' => $preferenceId,
+                'external_reference' => $externalReference,
+            ]);
+            return [
+                'updated' => false,
+                'status' => $status,
+                'user_id' => 0,
+            ];
+        }
+
+        $subscriptionId = (int) ($subscription['id'] ?? 0);
+        $userId = (int) ($subscription['user_id'] ?? 0);
+
+        if ($status === 'approved') {
+            $durationDays = max(1, (int) ($subscription['duration_days'] ?? 30));
+            $startDate = date('Y-m-d H:i:s');
+            $endDate = date('Y-m-d H:i:s', strtotime('+' . $durationDays . ' days'));
+
+            $update = Database::connection()->prepare(
+                'UPDATE subscriptions
+                 SET payment_status = "approved",
+                     status = "active",
+                     mercadopago_payment_id = :payment_id,
+                     start_date = :start_date,
+                     end_date = :end_date,
+                     started_at = :start_date,
+                     current_period_end = :end_date,
+                     payment_provider = "mercadopago",
+                     payment_reference = :payment_reference,
+                     updated_at = NOW()
+                 WHERE id = :id'
+            );
+            $update->execute([
+                'id' => $subscriptionId,
+                'payment_id' => $paymentId,
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'payment_reference' => $preferenceId !== '' ? $preferenceId : $paymentId,
+            ]);
+
+            $this->recordBillingEvent(
+                $subscriptionId,
+                $userId,
+                'payment_approved',
+                'success',
+                (int) round(((float) ($subscription['amount'] ?? 0)) * 100),
+                'BRL',
+                $paymentId,
+                [
+                    'provider_status' => $status,
+                    'preference_id' => $preferenceId,
+                ]
+            );
+
+            AppLogger::info('Pagamento aprovado no Mercado Pago', [
+                'user_id' => $userId,
+                'subscription_id' => $subscriptionId,
+                'payment_id' => $paymentId,
+            ]);
+
+            return [
+                'updated' => true,
+                'status' => $status,
+                'user_id' => $userId,
+            ];
+        }
+
+        if (in_array($status, ['rejected', 'cancelled'], true)) {
+            $update = Database::connection()->prepare(
+                'UPDATE subscriptions
+                 SET payment_status = "failed",
+                     status = "past_due",
+                     mercadopago_payment_id = :payment_id,
+                     updated_at = NOW()
+                 WHERE id = :id'
+            );
+            $update->execute([
+                'id' => $subscriptionId,
+                'payment_id' => $paymentId,
+            ]);
+
+            $this->recordBillingEvent(
+                $subscriptionId,
+                $userId,
+                'payment_failed',
+                'failed',
+                (int) round(((float) ($subscription['amount'] ?? 0)) * 100),
+                'BRL',
+                $paymentId,
+                [
+                    'provider_status' => $status,
+                    'preference_id' => $preferenceId,
+                ]
+            );
+
+            AppLogger::info('Pagamento rejeitado no Mercado Pago', [
+                'user_id' => $userId,
+                'subscription_id' => $subscriptionId,
+                'payment_id' => $paymentId,
+                'status' => $status,
+            ]);
+        }
+
+        return [
+            'updated' => false,
+            'status' => $status,
+            'user_id' => $userId,
+        ];
+    }
+
+    public function activatePlan(int $userId, string $planCode, string $paymentReference = 'manual'): array
+    {
+        $plan = $this->planByType($planCode);
+        if ($plan === null) {
+            throw new RuntimeException('Plano informado nao existe.');
+        }
+
+        $subscription = $this->getCurrentSubscription($userId);
+        if ($subscription === null) {
+            $subscription = $this->upsertPendingSubscription(Database::connection(), $userId, $planCode, $plan);
+        }
+
+        $startDate = date('Y-m-d H:i:s');
+        $endDate = date('Y-m-d H:i:s', strtotime('+' . (int) $plan['duration_days'] . ' days'));
 
         $stmt = Database::connection()->prepare(
             'UPDATE subscriptions
-             SET plan_id = :plan_id,
+             SET plan_type = :plan_type,
+                 payment_status = "approved",
                  status = "active",
-                 trial_ends_at = NULL,
-                 current_period_end = :current_period_end,
-                 canceled_at = NULL,
+                 amount = :amount,
+                 duration_days = :duration_days,
+                 start_date = :start_date,
+                 end_date = :end_date,
+                 started_at = :start_date,
+                 current_period_end = :end_date,
                  payment_provider = "manual",
                  payment_reference = :payment_reference,
                  updated_at = NOW()
-             WHERE id = :id AND user_id = :user_id'
+             WHERE user_id = :user_id'
         );
         $stmt->execute([
-            'id' => $subscriptionId,
             'user_id' => $userId,
-            'plan_id' => (int) $plan['id'],
-            'current_period_end' => $periodEnd,
+            'plan_type' => $planCode,
+            'amount' => (float) $plan['price'],
+            'duration_days' => (int) $plan['duration_days'],
+            'start_date' => $startDate,
+            'end_date' => $endDate,
             'payment_reference' => $paymentReference,
         ]);
-
-        $this->recordBillingEvent(
-            $subscriptionId,
-            $userId,
-            'subscription_activated',
-            'success',
-            (int) ($plan['price_cents'] ?? 0),
-            (string) ($plan['currency'] ?? 'BRL'),
-            $paymentReference,
-            ['plan_code' => (string) $plan['code']]
-        );
 
         return $this->getCurrentSubscription($userId) ?? [];
     }
@@ -159,40 +418,34 @@ final class BillingService
     {
         $subscription = $this->getCurrentSubscription($userId);
         if ($subscription === null) {
-            throw new RuntimeException('Assinatura não encontrada.');
+            throw new RuntimeException('Assinatura nao encontrada.');
         }
 
-        $subscriptionId = (int) ($subscription['id'] ?? 0);
         $stmt = Database::connection()->prepare(
             'UPDATE subscriptions
-             SET status = "canceled", canceled_at = NOW(), updated_at = NOW()
-             WHERE id = :id AND user_id = :user_id'
+             SET status = "canceled",
+                 payment_status = "cancelled",
+                 canceled_at = NOW(),
+                 updated_at = NOW()
+             WHERE user_id = :user_id'
         );
         $stmt->execute([
-            'id' => $subscriptionId,
             'user_id' => $userId,
         ]);
 
-        $this->recordBillingEvent(
-            $subscriptionId,
-            $userId,
-            'subscription_canceled',
-            'success',
-            0,
-            (string) ($subscription['currency'] ?? 'BRL'),
-            null,
-            ['plan_code' => (string) ($subscription['plan_code'] ?? '')]
-        );
-
-        return $this->getCurrentSubscription($userId) ?? $subscription;
+        return $this->getCurrentSubscription($userId) ?? [];
     }
 
     public function statusLabel(string $status): string
     {
         $map = [
-            'trialing' => 'Período de teste',
             'active' => 'Ativa',
+            'approved' => 'Ativa',
+            'pending' => 'Pagamento pendente',
             'past_due' => 'Pagamento pendente',
+            'failed' => 'Falhou',
+            'expired' => 'Expirada',
+            'cancelled' => 'Cancelada',
             'canceled' => 'Cancelada',
             'suspended' => 'Suspensa',
         ];
@@ -200,83 +453,37 @@ final class BillingService
         return $map[$status] ?? ucfirst($status);
     }
 
-    private function refreshSubscriptionState(int $subscriptionId): void
+    public function getSubscriptionApiPayload(int $userId): ?array
     {
-        $stmt = Database::connection()->prepare(
-            'SELECT id, status, trial_ends_at, current_period_end
-             FROM subscriptions
-             WHERE id = :id
-             LIMIT 1'
-        );
-        $stmt->execute(['id' => $subscriptionId]);
-        $subscription = $stmt->fetch();
-        if (!$subscription) {
-            return;
+        $subscription = $this->getCurrentSubscription($userId);
+        if ($subscription === null) {
+            return null;
         }
 
-        $status = (string) ($subscription['status'] ?? 'past_due');
-        if ($status === 'trialing') {
-            $trialEndsAt = (string) ($subscription['trial_ends_at'] ?? '');
-            if ($trialEndsAt !== '' && strtotime($trialEndsAt) !== false && strtotime($trialEndsAt) < time()) {
-                $update = Database::connection()->prepare(
-                    'UPDATE subscriptions SET status = "past_due", updated_at = NOW() WHERE id = :id'
-                );
-                $update->execute(['id' => $subscriptionId]);
-            }
-            return;
-        }
+        $normalizedStatus = (string) ($subscription['status_normalized'] ?? 'pending');
 
-        if ($status === 'active') {
-            $periodEnd = (string) ($subscription['current_period_end'] ?? '');
-            if ($periodEnd !== '' && strtotime($periodEnd) !== false && strtotime($periodEnd) < time()) {
-                $update = Database::connection()->prepare(
-                    'UPDATE subscriptions SET status = "past_due", updated_at = NOW() WHERE id = :id'
-                );
-                $update->execute(['id' => $subscriptionId]);
-            }
-        }
-    }
-
-    private function findDefaultPlan(): ?array
-    {
-        $preferredCode = trim((string) env('BILLING_DEFAULT_PLAN', 'starter'));
-        if ($preferredCode !== '') {
-            $preferred = $this->findPlanByCode($preferredCode);
-            if ($preferred !== null) {
-                return $preferred;
-            }
-        }
-
-        $stmt = Database::connection()->query(
-            'SELECT id, code, name, description, price_cents, currency, interval_months, max_team_members, max_monthly_messages
-             FROM billing_plans
-             WHERE is_active = 1
-             ORDER BY price_cents ASC, id ASC
-             LIMIT 1'
-        );
-
-        $row = $stmt ? $stmt->fetch() : null;
-        return $row ?: null;
+        return [
+            'planType' => (string) ($subscription['plan_type'] ?? 'monthly'),
+            'amount' => (float) ($subscription['amount'] ?? 0.0),
+            'endDate' => (string) ($subscription['end_date'] ?? ''),
+            'daysRemaining' => (int) ($subscription['days_remaining'] ?? 0),
+            'status' => $normalizedStatus,
+        ];
     }
 
     private function findPlanByCode(string $code): ?array
     {
-        $stmt = Database::connection()->prepare(
-            'SELECT id, code, name, description, price_cents, currency, interval_months, max_team_members, max_monthly_messages
-             FROM billing_plans
-             WHERE code = :code AND is_active = 1
-             LIMIT 1'
-        );
-        $stmt->execute(['code' => $code]);
-        $row = $stmt->fetch();
-
-        return $row ?: null;
+        return $this->planByType($code);
     }
 
-    private function trialDays(): int
+    private function planByType(string $planType): ?array
     {
-        $days = (int) env('BILLING_TRIAL_DAYS', '14');
-        return max(0, $days);
+        $normalized = mb_strtolower(trim($planType), 'UTF-8');
+        if (!isset(self::PLAN_CATALOG[$normalized])) {
+            return null;
+        }
+
+        return self::PLAN_CATALOG[$normalized];
     }
 
     private function recordBillingEvent(
@@ -306,5 +513,264 @@ final class BillingService
             'provider_reference' => $providerReference,
             'payload_json' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
+    }
+
+    private function upsertPendingSubscription(PDO $db, int $userId, string $planType, array $plan): array
+    {
+        $subscription = $this->getCurrentSubscription($userId);
+        $planId = $this->resolvePlanIdByType($planType);
+
+        if ($subscription === null) {
+            $stmt = $db->prepare(
+                'INSERT INTO subscriptions (
+                    external_uuid, user_id, plan_id, plan_type, status, payment_status,
+                    amount, duration_days, started_at, current_period_end,
+                    start_date, end_date,
+                    payment_provider, payment_reference,
+                    created_at, updated_at
+                 ) VALUES (
+                    :external_uuid, :user_id, :plan_id, :plan_type, "past_due", "pending",
+                    :amount, :duration_days, NOW(), NULL,
+                    NULL, NULL,
+                    "mercadopago", NULL,
+                    NOW(), NOW()
+                 )'
+            );
+            $stmt->execute([
+                'external_uuid' => $this->generateUuidV4(),
+                'user_id' => $userId,
+                'plan_id' => $planId,
+                'plan_type' => $planType,
+                'amount' => (float) $plan['price'],
+                'duration_days' => (int) $plan['duration_days'],
+            ]);
+        } else {
+            $stmt = $db->prepare(
+                'UPDATE subscriptions
+                 SET plan_id = :plan_id,
+                     plan_type = :plan_type,
+                     status = "past_due",
+                     payment_status = "pending",
+                     amount = :amount,
+                     duration_days = :duration_days,
+                     mercadopago_payment_id = NULL,
+                     start_date = NULL,
+                     end_date = NULL,
+                     started_at = NOW(),
+                     current_period_end = NULL,
+                     payment_provider = "mercadopago",
+                     payment_reference = NULL,
+                     updated_at = NOW()
+                 WHERE user_id = :user_id'
+            );
+            $stmt->execute([
+                'user_id' => $userId,
+                'plan_id' => $planId,
+                'plan_type' => $planType,
+                'amount' => (float) $plan['price'],
+                'duration_days' => (int) $plan['duration_days'],
+            ]);
+        }
+
+        $fresh = $this->getCurrentSubscription($userId);
+        if ($fresh === null) {
+            throw new RuntimeException('Falha ao preparar assinatura para checkout.');
+        }
+
+        return $fresh;
+    }
+
+    private function resolvePlanIdByType(string $planType): int
+    {
+        $stmt = Database::connection()->prepare('SELECT id FROM billing_plans WHERE code = :code LIMIT 1');
+        $stmt->execute(['code' => $planType]);
+        $existing = $stmt->fetch();
+        if (is_array($existing) && isset($existing['id'])) {
+            return (int) $existing['id'];
+        }
+
+        $plan = $this->planByType($planType);
+        if ($plan === null) {
+            throw new RuntimeException('Plano nao encontrado.');
+        }
+
+        $insert = Database::connection()->prepare(
+            'INSERT INTO billing_plans (
+                code, name, description, price_cents, currency, interval_months,
+                max_team_members, max_monthly_messages, is_active, created_at, updated_at
+             ) VALUES (
+                :code, :name, :description, :price_cents, "BRL", :interval_months,
+                9999, 999999, 1, NOW(), NOW()
+             )'
+        );
+        $insert->execute([
+            'code' => $planType,
+            'name' => (string) $plan['name'],
+            'description' => 'Acesso total ao SaaS.',
+            'price_cents' => (int) round(((float) $plan['price']) * 100),
+            'interval_months' => (int) ceil(((int) $plan['duration_days']) / 30),
+        ]);
+
+        return (int) Database::connection()->lastInsertId();
+    }
+
+    private function buildPreferencePayload(int $userId, array $subscription, string $planType, array $plan): array
+    {
+        $workspace = $this->loadWorkspaceUser($userId);
+        $payerEmail = (string) ($workspace['email'] ?? '');
+        $externalUuid = (string) ($subscription['external_uuid'] ?? '');
+
+        $frontendUrl = rtrim((string) env('FRONTEND_URL', ''), '/');
+        $apiUrl = rtrim((string) env('API_URL', ''), '/');
+
+        $successUrl = $frontendUrl !== ''
+            ? $frontendUrl . '/success'
+            : $this->routeUrl('route=billing_result&status=success');
+        $failureUrl = $frontendUrl !== ''
+            ? $frontendUrl . '/failure'
+            : $this->routeUrl('route=billing_result&status=failure');
+        $pendingUrl = $frontendUrl !== ''
+            ? $frontendUrl . '/pending'
+            : $this->routeUrl('route=billing_result&status=pending');
+        $notificationUrl = $apiUrl !== ''
+            ? $apiUrl . '/webhook/mercadopago'
+            : $this->routeUrl('route=mercadopago_webhook');
+
+        return [
+            'items' => [
+                [
+                    'id' => $planType,
+                    'title' => 'Atendy - Plano ' . (string) $plan['name'],
+                    'description' => 'Assinatura com acesso total ao SaaS.',
+                    'quantity' => 1,
+                    'currency_id' => 'BRL',
+                    'unit_price' => (float) $plan['price'],
+                ],
+            ],
+            'payer' => [
+                'email' => $payerEmail,
+            ],
+            'payment_methods' => [
+                'installments' => 12,
+                'excluded_payment_types' => [
+                    ['id' => 'ticket'],
+                    ['id' => 'atm'],
+                ],
+                'excluded_payment_methods' => [],
+            ],
+            'external_reference' => $externalUuid,
+            'metadata' => [
+                'user_id' => $userId,
+                'plan_type' => $planType,
+                'duration_days' => (int) $plan['duration_days'],
+                'subscription_id' => (int) ($subscription['id'] ?? 0),
+            ],
+            'back_urls' => [
+                'success' => $successUrl,
+                'failure' => $failureUrl,
+                'pending' => $pendingUrl,
+            ],
+            'notification_url' => $notificationUrl,
+        ];
+    }
+
+    private function routeUrl(string $queryString): string
+    {
+        $appUrl = trim((string) env('APP_URL', ''));
+        if ($appUrl === '') {
+            $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+            $script = (string) ($_SERVER['SCRIPT_NAME'] ?? '/index.php');
+            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+            $appUrl = $scheme . '://' . $host . $script;
+        }
+
+        $separator = str_contains($appUrl, '?') ? '&' : '?';
+        return rtrim($appUrl, '?&') . $separator . ltrim($queryString, '?&');
+    }
+
+    private function loadWorkspaceUser(int $userId): array
+    {
+        $stmt = Database::connection()->prepare('SELECT id, email, nome_consultorio FROM users WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $userId]);
+        $row = $stmt->fetch();
+        return is_array($row) ? $row : [];
+    }
+
+    private function daysRemaining(string $endDate): int
+    {
+        if ($endDate === '' || strtotime($endDate) === false) {
+            return 0;
+        }
+
+        $seconds = strtotime($endDate) - time();
+        if ($seconds <= 0) {
+            return 0;
+        }
+
+        return (int) ceil($seconds / 86400);
+    }
+
+    private function normalizeSubscriptionStatus(array $subscription, int $daysRemaining): string
+    {
+        $paymentStatus = mb_strtolower(trim((string) ($subscription['payment_status'] ?? 'pending')), 'UTF-8');
+        if ($paymentStatus === 'approved') {
+            return $daysRemaining > 0 ? 'active' : 'expired';
+        }
+
+        if (in_array($paymentStatus, ['failed', 'cancelled'], true)) {
+            return 'expired';
+        }
+
+        return 'pending';
+    }
+
+    private function findSubscriptionByProviderReference(string $preferenceId, string $externalReference): ?array
+    {
+        if ($preferenceId !== '') {
+            $byPreference = Database::connection()->prepare(
+                'SELECT id, user_id, amount, duration_days
+                 FROM subscriptions
+                 WHERE mercadopago_preference_id = :preference_id
+                 LIMIT 1'
+            );
+            $byPreference->execute(['preference_id' => $preferenceId]);
+            $row = $byPreference->fetch();
+            if ($row) {
+                return $row;
+            }
+        }
+
+        if ($externalReference !== '') {
+            $byExternal = Database::connection()->prepare(
+                'SELECT id, user_id, amount, duration_days
+                 FROM subscriptions
+                 WHERE external_uuid = :external_uuid
+                 LIMIT 1'
+            );
+            $byExternal->execute(['external_uuid' => $externalReference]);
+            $row = $byExternal->fetch();
+            if ($row) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    private function generateUuidV4(): string
+    {
+        $bytes = random_bytes(16);
+        $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+        $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+        $hex = bin2hex($bytes);
+
+        return sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($hex, 0, 8),
+            substr($hex, 8, 4),
+            substr($hex, 12, 4),
+            substr($hex, 16, 4),
+            substr($hex, 20, 12)
+        );
     }
 }

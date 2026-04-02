@@ -1,4 +1,37 @@
 <!doctype html>
+<?php $currentRoute = (string) ($_GET['route'] ?? 'dashboard'); ?>
+<?php $hasSidebar = Auth::check(); ?>
+<?php
+$scriptName = (string) ($_SERVER['SCRIPT_NAME'] ?? '/index.php');
+$assetBasePath = rtrim(str_replace('\\', '/', dirname($scriptName)), '/');
+if ($assetBasePath === '.' || $assetBasePath === '') {
+    $assetBasePath = '';
+}
+
+// Assets live under /public/assets; in some setups SCRIPT_NAME does not include /public.
+if ($assetBasePath === '' || !preg_match('#/public$#', $assetBasePath)) {
+    $assetBasePath = rtrim($assetBasePath . '/public', '/');
+}
+$loginBackgroundCandidates = [
+    '/assets/images/login-bg-dental.webp',
+    '/assets/images/login-bg-dental.jpg',
+    '/assets/images/login-bg-dental.jpeg',
+    '/assets/images/login-bg-dental.png',
+    '/assets/images/login-bg.webp',
+    '/assets/images/login-bg.jpg',
+    '/assets/images/login-bg.jpeg',
+    '/assets/images/login-bg.png',
+];
+$loginBackgroundUrl = $assetBasePath . $loginBackgroundCandidates[0];
+foreach ($loginBackgroundCandidates as $candidatePath) {
+    $candidateFile = __DIR__ . '/../../../public' . str_replace('/', DIRECTORY_SEPARATOR, $candidatePath);
+    if (is_file($candidateFile)) {
+        $loginBackgroundUrl = $assetBasePath . $candidatePath;
+        break;
+    }
+}
+$isLoginBackgroundPage = !$hasSidebar && in_array($currentRoute, ['', 'login'], true);
+?>
 <html lang="pt-BR">
 <head>
     <meta charset="utf-8">
@@ -29,6 +62,23 @@
         .auth-top{padding:20px 20px 0}
         .auth-brand{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:#1e3a8a;font-weight:700}
         .brand-badge{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#2563eb,#60a5fa);color:#fff}
+
+        body.login-screen{
+            background:
+                linear-gradient(118deg, rgba(14,23,38,.56) 0%, rgba(14,23,38,.35) 46%, rgba(14,23,38,.2) 100%),
+                url('<?= e($loginBackgroundUrl) ?>') center center / cover no-repeat fixed;
+        }
+        body.login-screen .auth-top,
+        body.login-screen .auth-login-shell{position:relative;z-index:1}
+        .auth-login-shell{min-height:calc(100vh - 74px);display:flex;align-items:center;justify-content:center;padding:26px 16px 30px}
+        .login-card{
+            width:min(100%,460px);
+            margin:0;
+            background:linear-gradient(180deg,rgba(243,247,251,.92),rgba(230,237,246,.9));
+            border:1px solid rgba(210,220,232,.95);
+            box-shadow:0 18px 38px rgba(9,20,36,.24);
+            backdrop-filter:blur(7px);
+        }
 
         .app-shell{min-height:100vh;display:flex;transition:.2s ease}
         .sidebar{width:var(--sidebar-w);background:linear-gradient(180deg,#0f172a 0%,#132036 100%);color:#cbd5e1;padding:18px 14px;position:sticky;top:0;height:100vh;border-right:1px solid rgba(255,255,255,.08);transition:width .22s ease,padding .22s ease}
@@ -136,12 +186,19 @@
             .container{margin:18px auto;padding:0 14px}
             .page-title{font-size:26px}
             .sidebar-toggle{display:inline-flex}
+
+            body.login-screen{
+                background:
+                    linear-gradient(180deg, rgba(14,23,38,.6) 0%, rgba(14,23,38,.34) 45%, rgba(14,23,38,.2) 100%),
+                    url('<?= e($loginBackgroundUrl) ?>') 58% center / cover no-repeat;
+            }
+            .auth-top{padding:14px 14px 0}
+            .auth-login-shell{min-height:calc(100vh - 64px);padding:14px 12px 16px;align-items:flex-end}
+            .login-card{width:100%;max-width:440px}
         }
     </style>
 </head>
-<body>
-<?php $currentRoute = (string) ($_GET['route'] ?? 'dashboard'); ?>
-<?php $hasSidebar = Auth::check(); ?>
+<body class="<?= $isLoginBackgroundPage ? 'login-screen' : '' ?>">
 <?php $sessionUser = Auth::user() ?? []; ?>
 <?php $sessionRole = auth_user_role(); ?>
 <?php $sessionDisplayName = $sessionRole === 'owner' ? (string) ($sessionUser['nome_consultorio'] ?? '') : (string) ($sessionUser['team_member_name'] ?? $sessionUser['email'] ?? ''); ?>
@@ -170,7 +227,7 @@ if ($sessionDisplayName === '' || strpos($sessionDisplayName, '??') !== false ||
             <?php if (auth_can_access_route('reports')): ?><a data-label="Relatórios" class="<?= $currentRoute === 'reports' ? 'active' : '' ?>" href="<?= e(base_url('route=reports')) ?>"><span class="nav-label">Relatórios</span></a><?php endif; ?>
             <?php if (auth_can_access_route('team')): ?><a data-label="Equipe" class="<?= $currentRoute === 'team' ? 'active' : '' ?>" href="<?= e(base_url('route=team')) ?>"><span class="nav-label">Equipe</span></a><?php endif; ?>
             <?php if (auth_can_access_route('settings')): ?><a data-label="Configurações" class="<?= $currentRoute === 'settings' ? 'active' : '' ?>" href="<?= e(base_url('route=settings')) ?>"><span class="nav-label">Configurações</span></a><?php endif; ?>
-            <?php if (auth_can_access_route('billing')): ?><a data-label="Assinatura" class="<?= $currentRoute === 'billing' ? 'active' : '' ?>" href="<?= e(base_url('route=billing')) ?>"><span class="nav-label">Assinatura</span></a><?php endif; ?>
+            <?php if (auth_can_access_route('billing')): ?><a data-label="Assinatura" class="<?= in_array($currentRoute, ['billing', 'pricing'], true) ? 'active' : '' ?>" href="<?= e(base_url('route=pricing')) ?>"><span class="nav-label">Assinatura</span></a><?php endif; ?>
             <a data-label="Sair" href="<?= e(base_url('route=logout')) ?>"><span class="nav-label">Sair</span></a>
         </nav>
 

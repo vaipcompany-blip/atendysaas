@@ -18,6 +18,8 @@ final class DashboardController
     {
         $user = Auth::user();
         $userId = (int) ($user['id'] ?? 0);
+        $billing = new BillingService();
+        $subscriptionStatus = $billing->getSubscriptionApiPayload($userId);
 
         try {
             $db = Database::connection();
@@ -113,6 +115,7 @@ final class DashboardController
             'patientPerformance'   => $patientPerformance,
             'monthlyConversionGoal'=> $monthlyConversionGoal,
             'upcomingAppointments' => $upcomingAppointments,
+            'subscriptionStatus'   => $subscriptionStatus,
         ]);
         } catch (Throwable $e) {
             AppLogger::error('Dashboard load failed', [
@@ -173,6 +176,7 @@ final class DashboardController
                     'achievement_rate' => 0.0,
                 ],
                 'upcomingAppointments' => [],
+                'subscriptionStatus'   => null,
             ]);
         }
     }

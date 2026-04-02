@@ -78,6 +78,12 @@ $patientPerformanceData = $patientPerformance ?? [
     'avg_revenue_per_patient' => 0.0,
     'top_patients' => [],
 ];
+
+$subscriptionInfo = $subscriptionStatus ?? null;
+$subscriptionPlan = (string) ($subscriptionInfo['planType'] ?? '');
+$subscriptionEndDate = (string) ($subscriptionInfo['endDate'] ?? '');
+$subscriptionDaysRemaining = (int) ($subscriptionInfo['daysRemaining'] ?? 0);
+$subscriptionState = (string) ($subscriptionInfo['status'] ?? 'pending');
 ?>
 
 <style>
@@ -112,6 +118,13 @@ $patientPerformanceData = $patientPerformance ?? [
 .reveal.is-visible{opacity:1;transform:translateY(0)}
 
 .insight{margin-top:10px;padding:10px 12px;border-radius:10px;background:#f8fbff;border:1px solid #dbeafe;color:#334155;font-size:13px}
+.subscription-box{border:1px solid #dbeafe;background:#eff6ff;border-radius:14px;padding:12px 14px}
+.subscription-box.pending{border-color:#fde68a;background:#fffbeb}
+.subscription-box.expired{border-color:#fecaca;background:#fef2f2}
+.subscription-box.active{border-color:#86efac;background:#f0fdf4}
+.subscription-alert{margin-top:8px;font-size:12px;font-weight:700}
+.subscription-alert.warn{color:#92400e}
+.subscription-alert.danger{color:#991b1b}
 
 .upcoming-list{display:flex;flex-direction:column;gap:8px;max-height:320px;overflow:auto;padding-right:2px}
 .upcoming-item{display:flex;gap:10px;align-items:flex-start;border:1px solid #eef2f7;background:#fbfdff;border-radius:12px;padding:10px}
@@ -152,6 +165,27 @@ $patientPerformanceData = $patientPerformance ?? [
             <?php endforeach; ?>
         </div>
     </section>
+
+    <?php if (is_array($subscriptionInfo)): ?>
+        <section class="subscription-box <?= e($subscriptionState) ?>">
+            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;">
+                <div>
+                    <strong>Sua assinatura:</strong>
+                    <?= e($subscriptionPlan !== '' ? $subscriptionPlan : '-') ?> -
+                    <?= e($subscriptionState === 'active' ? 'Ativa' : ($subscriptionState === 'expired' ? 'Expirada' : 'Pendente')) ?>
+                    ate <?= e($subscriptionEndDate !== '' ? date('d/m/Y', strtotime($subscriptionEndDate)) : '-') ?>
+                    <span class="chip" style="margin-left:6px;"><?= e((string) $subscriptionDaysRemaining) ?> dias restantes</span>
+                </div>
+                <a href="<?= e(base_url('route=pricing')) ?>" style="display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:10px;background:#0f766e;color:#fff;font-weight:700;text-decoration:none;">Renovar Assinatura</a>
+            </div>
+
+            <?php if ($subscriptionState === 'active' && $subscriptionDaysRemaining < 7): ?>
+                <div class="subscription-alert <?= $subscriptionDaysRemaining < 3 ? 'danger' : 'warn' ?>">
+                    <?= $subscriptionDaysRemaining < 3 ? 'Sua assinatura vence em menos de 3 dias.' : 'Sua assinatura vence em menos de 7 dias.' ?>
+                </div>
+            <?php endif; ?>
+        </section>
+    <?php endif; ?>
 
     <section class="kpi-grid">
         <div class="kpi"><div class="kpi-label">Pacientes</div><div class="kpi-value"><?= e((string) $totalPatients) ?></div><div class="kpi-sub">+<?= e((string) $newLeads) ?> leads no período</div></div>
