@@ -71,6 +71,7 @@ require_once __DIR__ . '/controllers/PatientController.php';
 require_once __DIR__ . '/controllers/AppointmentController.php';
 require_once __DIR__ . '/controllers/WhatsAppController.php';
 require_once __DIR__ . '/controllers/BillingController.php';
+require_once __DIR__ . '/controllers/KirvanoWebhookController.php';
 require_once __DIR__ . '/controllers/FinanceiroController.php';
 require_once __DIR__ . '/controllers/CalendarController.php';
 require_once __DIR__ . '/controllers/HealthController.php';

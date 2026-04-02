@@ -93,25 +93,35 @@ if ($currentStatus === 'expired') {
                 <div class="plan-duration"><?= e((string) ($plan['duration'] ?? '')) ?></div>
 
                 <ul class="plan-features">
-                    <li>OK Acesso total ao SaaS</li>
-                    <li>OK Todas as features</li>
-                    <li>OK Suporte por email</li>
-                    <li>OK Atualizacoes incluidas</li>
+                    <li>✓ Acesso total ao SaaS</li>
+                    <li>✓ Todas as features</li>
+                    <li>✓ Suporte por email</li>
+                    <li>✓ Atualizacoes incluidas</li>
                 </ul>
 
-                <div class="pay-note">Pagamento: Cartao e PIX via Mercado Pago.</div>
+                <div class="pay-note">Pagamento: Cartao e PIX via Kirvano. Acesso liberado automaticamente.</div>
 
-                <form method="post" action="<?= e(base_url('route=billing')) ?>">
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="action" value="<?= $currentStatus === 'active' ? 'renew_subscription' : 'checkout' ?>">
-                    <input type="hidden" name="plan_type" value="<?= e($planCode) ?>">
-                    <button type="submit" class="btn-block"><?= $isCurrent ? 'Renovar assinatura' : 'Assinar plano' ?></button>
-                </form>
+                <?php
+                $kirvanoEnvKey = match ($planCode) {
+                    'monthly'   => 'KIRVANO_CHECKOUT_MENSAL',
+                    'quarterly' => 'KIRVANO_CHECKOUT_TRIMESTRAL',
+                    'annual'    => 'KIRVANO_CHECKOUT_ANUAL',
+                    default     => '',
+                };
+                $kirvanoLink = $kirvanoEnvKey !== '' ? trim((string) (getenv($kirvanoEnvKey) ?: '')) : '';
+                ?>
+                <?php if ($kirvanoLink !== ''): ?>
+                    <a href="<?= e($kirvanoLink) ?>" target="_blank" rel="noopener noreferrer" class="btn-block" style="text-align:center;display:block;text-decoration:none">
+                        <?= $isCurrent ? 'Renovar assinatura' : 'Assinar plano' ?>
+                    </a>
+                <?php else: ?>
+                    <button type="button" class="btn-block" disabled style="opacity:.5;cursor:not-allowed">Checkout em breve</button>
+                <?php endif; ?>
             </article>
         <?php endforeach; ?>
     </section>
 
-    <?php if ($publicKey === ''): ?>
-        <div class="alert">Mercado Pago ainda nao configurado. Defina MERCADOPAGO_ACCESS_TOKEN e MERCADOPAGO_PUBLIC_KEY no ambiente.</div>
+    <?php if (trim((string) (getenv('KIRVANO_CHECKOUT_MENSAL') ?: '')) === ''): ?>
+        <div class="alert">Kirvano ainda nao configurado. Defina KIRVANO_CHECKOUT_MENSAL, KIRVANO_CHECKOUT_TRIMESTRAL e KIRVANO_CHECKOUT_ANUAL no ambiente.</div>
     <?php endif; ?>
 </div>

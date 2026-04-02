@@ -319,7 +319,7 @@ function ensure_route_access(string $route, string $method = 'GET', string $acti
 
 function billing_route_is_exempt(string $route): bool
 {
-    return in_array($route, ['billing', 'pricing', 'checkout', 'renew_subscription', 'billing_result', 'billing_success', 'billing_failure', 'billing_pending', 'my_subscription', 'api_checkout', 'api_renew_subscription', 'api_me_subscription', 'api_plans', 'logout', 'health', 'calendar_feed', 'whatsapp_webhook', 'mercadopago_webhook', 'plans'], true);
+    return in_array($route, ['billing', 'pricing', 'checkout', 'renew_subscription', 'billing_result', 'billing_success', 'billing_failure', 'billing_pending', 'my_subscription', 'api_checkout', 'api_renew_subscription', 'api_me_subscription', 'api_plans', 'logout', 'health', 'calendar_feed', 'whatsapp_webhook', 'mercadopago_webhook', 'kirvano_webhook', 'plans'], true);
 }
 
 function ensure_subscription_access(string $route, string $method = 'GET', string $action = ''): void

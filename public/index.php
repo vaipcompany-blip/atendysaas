@@ -27,6 +27,7 @@ if ($route === '') {
         '/api/renew-subscription' => 'api_renew_subscription',
         '/api/me/subscription' => 'api_me_subscription',
         '/webhook/mercadopago' => 'mercadopago_webhook',
+        '/webhook/kirvano' => 'kirvano_webhook',
         '/pricing' => 'pricing',
         '/success' => 'billing_success',
         '/failure' => 'billing_failure',
@@ -43,6 +44,7 @@ $patientController = new PatientController();
 $appointmentController = new AppointmentController();
 $whatsAppController = new WhatsAppController();
 $billingController = new BillingController();
+$kirvanoWebhookController = new KirvanoWebhookController();
 $financeiroController = new FinanceiroController();
 $calendarController = new CalendarController();
 $healthController = new HealthController();
@@ -132,6 +134,17 @@ if ($route === 'whatsapp_webhook') {
 if ($route === 'mercadopago_webhook') {
     if ($method === 'POST' || $method === 'GET') {
         $billingController->webhookMercadoPago();
+        exit;
+    }
+
+    http_response_code(405);
+    echo 'Method not allowed';
+    exit;
+}
+
+if ($route === 'kirvano_webhook') {
+    if ($method === 'POST') {
+        $kirvanoWebhookController->handle();
         exit;
     }
 
