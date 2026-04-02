@@ -8,10 +8,10 @@ final class DashboardController
 
     /** Períodos válidos e seus rótulos para exibição. */
     private const PERIODS = [
-        '7d'  => '�sltimos 7 dias',
-        '30d' => '�sltimos 30 dias',
-        '3m'  => '�sltimos 3 meses',
-        '12m' => '�sltimos 12 meses',
+        '7d'  => 'Ultimos 7 dias',
+        '30d' => 'Ultimos 30 dias',
+        '3m'  => 'Ultimos 3 meses',
+        '12m' => 'Ultimos 12 meses',
     ];
 
     public function index(): void
