@@ -130,7 +130,7 @@ if ($route === 'whatsapp_webhook') {
 }
 
 if ($route === 'mercadopago_webhook') {
-    if ($method === 'POST') {
+    if ($method === 'POST' || $method === 'GET') {
         $billingController->webhookMercadoPago();
         exit;
     }

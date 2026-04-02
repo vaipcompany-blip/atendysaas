@@ -618,6 +618,9 @@ final class BillingService
     {
         $workspace = $this->loadWorkspaceUser($userId);
         $payerEmail = (string) ($workspace['email'] ?? '');
+        if ($payerEmail === '') {
+            $payerEmail = 'no-reply+' . $userId . '@atendy.app';
+        }
         $externalUuid = (string) ($subscription['external_uuid'] ?? '');
 
         $frontendUrl = rtrim((string) env('FRONTEND_URL', ''), '/');
@@ -632,9 +635,12 @@ final class BillingService
         $pendingUrl = $frontendUrl !== ''
             ? $frontendUrl . '/pending'
             : $this->routeUrl('route=billing_result&status=pending');
-        $notificationUrl = $apiUrl !== ''
-            ? $apiUrl . '/webhook/mercadopago'
-            : $this->routeUrl('route=mercadopago_webhook');
+        $notificationUrl = trim((string) env('MERCADOPAGO_WEBHOOK_URL', ''));
+        if ($notificationUrl === '') {
+            $notificationUrl = $apiUrl !== ''
+                ? rtrim($apiUrl, '/') . '/webhook/mercadopago'
+                : $this->routeUrl('route=mercadopago_webhook');
+        }
 
         return [
             'items' => [

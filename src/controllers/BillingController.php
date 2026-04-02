@@ -136,25 +136,39 @@ final class BillingController
 
     public function webhookMercadoPago(): void
     {
-        $raw = file_get_contents('php://input');
-        $payload = json_decode((string) $raw, true);
+        $raw = (string) file_get_contents('php://input');
+        $payload = json_decode($raw, true);
 
-        if (!is_array($payload)) {
-            http_response_code(200);
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['received' => true], JSON_UNESCAPED_UNICODE);
-            return;
+        $type = '';
+        $paymentId = '';
+
+        if (is_array($payload)) {
+            $type = mb_strtolower(trim((string) ($payload['type'] ?? $payload['topic'] ?? '')), 'UTF-8');
+            $paymentId = trim((string) ($payload['data']['id'] ?? $payload['id'] ?? ''));
+
+            if ($paymentId === '') {
+                $resource = trim((string) ($payload['resource'] ?? ''));
+                if ($resource !== '' && preg_match('~/v1/payments/(\d+)~', $resource, $matches) === 1) {
+                    $paymentId = (string) ($matches[1] ?? '');
+                }
+            }
         }
 
-        $type = mb_strtolower(trim((string) ($payload['type'] ?? '')), 'UTF-8');
-        $paymentId = (string) ($payload['data']['id'] ?? '');
+        if ($type === '') {
+            $type = mb_strtolower(trim((string) ($_GET['type'] ?? $_GET['topic'] ?? $_POST['type'] ?? $_POST['topic'] ?? '')), 'UTF-8');
+        }
 
-        if ($type === 'payment' && $paymentId !== '') {
+        if ($paymentId === '') {
+            $paymentId = trim((string) ($_GET['id'] ?? $_GET['data.id'] ?? $_POST['id'] ?? $_POST['data.id'] ?? ''));
+        }
+
+        if ($paymentId !== '' && ($type === '' || $type === 'payment')) {
             try {
                 $this->billing->processPaymentWebhook($paymentId);
             } catch (Throwable $e) {
                 AppLogger::error('Mercado Pago webhook process failed', [
                     'payment_id' => $paymentId,
+                    'type' => $type,
                     'error' => $e->getMessage(),
                 ]);
             }
