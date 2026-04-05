@@ -361,6 +361,12 @@ function ensure_subscription_access(string $route, string $method = 'GET', strin
         return;
     }
 
+    // Soft-lock mode: allow screen navigation even without active subscription.
+    // Keep blocking write/API operations until payment is approved.
+    if ($method === 'GET') {
+        return;
+    }
+
     $decision = $billing->getAccessDecision($workspaceId);
     $message = (string) ($decision['message'] ?? 'Assinatura necessaria. Escolha um plano.');
     if (auth_request_expects_json($route, $method, $action)) {
