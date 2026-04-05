@@ -51,6 +51,27 @@
     width: 100%;
 }
 
+a.btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 40px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid #334155;
+    background: #334155;
+    color: #ffffff !important;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+a.btn-secondary:hover {
+    background: #1f2937;
+    border-color: #1f2937;
+    color: #ffffff !important;
+}
+
 @media (max-width: 980px) {
     .wa-chart-grid {
         grid-template-columns: 1fr;
