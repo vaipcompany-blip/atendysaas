@@ -29,6 +29,7 @@ if ($route === '') {
         '/webhook/mercadopago' => 'mercadopago_webhook',
         '/webhook/kirvano' => 'kirvano_webhook',
         '/pricing' => 'pricing',
+        '/pos-compra' => 'post_purchase_register',
         '/success' => 'billing_success',
         '/failure' => 'billing_failure',
         '/pending' => 'billing_pending',
@@ -70,6 +71,17 @@ if ($route === 'register') {
     }
 
     $authController->showRegister();
+    exit;
+}
+
+if ($route === 'post_purchase_register') {
+    if ($method !== 'GET') {
+        http_response_code(405);
+        echo 'Method not allowed';
+        exit;
+    }
+
+    $authController->showPostPurchaseRegister();
     exit;
 }
 

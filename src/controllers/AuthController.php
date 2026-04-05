@@ -6,6 +6,7 @@ final class AuthController
 {
     private const LOGIN_MAX_ATTEMPTS = 5;
     private const LOGIN_WINDOW_MINUTES = 15;
+    private const POST_PURCHASE_REGISTER_WINDOW_SECONDS = 1800;
 
     public function showLogin(): void
     {
@@ -22,6 +23,10 @@ final class AuthController
 
     public function showRegister(): void
     {
+        if (!$this->hasPostPurchaseRegistrationAccess()) {
+            redirect(base_url('route=login&error=' . urlencode('Cadastro disponível apenas após pagamento confirmado.')));
+        }
+
         if (Auth::check()) {
             redirect(base_url('route=dashboard'));
         }
@@ -37,10 +42,40 @@ final class AuthController
         ]);
     }
 
+    public function showPostPurchaseRegister(): void
+    {
+        if (Auth::check()) {
+            redirect(base_url('route=dashboard'));
+        }
+
+        $email = mb_strtolower(trim((string) ($_GET['email'] ?? '')), 'UTF-8');
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $email = '';
+        }
+
+        $this->grantPostPurchaseRegistrationAccess($email);
+
+        $legal = new LegalService();
+        $error = $_GET['error'] ?? null;
+        $message = $_GET['message'] ?? null;
+
+        View::render('auth/post_purchase_register', [
+            'email' => $email,
+            'error' => $error,
+            'message' => $message,
+            'legalVersions' => $legal->currentVersions(),
+            'legalLinks' => $legal->legalLinks(),
+        ]);
+    }
+
     public function register(): void
     {
+        if (!$this->hasPostPurchaseRegistrationAccess()) {
+            redirect(base_url('route=login&error=' . urlencode('Cadastro disponível apenas após pagamento confirmado.')));
+        }
+
         if (!verify_csrf($_POST['csrf_token'] ?? null)) {
-            redirect(base_url('route=register&error=Token inválido'));
+            redirect(base_url('route=post_purchase_register&error=' . urlencode('Token inválido')));
         }
 
         $nomeConsultorio = trim((string) ($_POST['nome_consultorio'] ?? ''));
@@ -51,33 +86,37 @@ final class AuthController
         $password = (string) ($_POST['password'] ?? '');
         $passwordConfirm = (string) ($_POST['password_confirm'] ?? '');
         $acceptLegal = (string) ($_POST['accept_legal'] ?? '0');
+        $returnRoute = 'route=post_purchase_register';
+        if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $returnRoute .= '&email=' . urlencode($email);
+        }
 
         if ($nomeConsultorio === '' || $email === '' || $cpf === '' || $telefone === '' || $password === '' || $passwordConfirm === '') {
-            redirect(base_url('route=register&error=' . urlencode('Preencha todos os campos obrigatórios.')));
+            redirect(base_url($returnRoute . '&error=' . urlencode('Preencha todos os campos obrigatórios.')));
         }
 
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            redirect(base_url('route=register&error=' . urlencode('E-mail inválido.')));
+            redirect(base_url($returnRoute . '&error=' . urlencode('E-mail inválido.')));
         }
 
         if (strlen($cpf) !== 11) {
-            redirect(base_url('route=register&error=' . urlencode('CPF deve ter 11 dígitos.')));
+            redirect(base_url($returnRoute . '&error=' . urlencode('CPF deve ter 11 dígitos.')));
         }
 
         if (strlen($telefone) < 10 || strlen($telefone) > 11) {
-            redirect(base_url('route=register&error=' . urlencode('Telefone deve ter 10 ou 11 dígitos.')));
+            redirect(base_url($returnRoute . '&error=' . urlencode('Telefone deve ter 10 ou 11 dígitos.')));
         }
 
         if (strlen($password) < 8) {
-            redirect(base_url('route=register&error=' . urlencode('A senha deve ter no mínimo 8 caracteres.')));
+            redirect(base_url($returnRoute . '&error=' . urlencode('A senha deve ter no mínimo 8 caracteres.')));
         }
 
         if (!hash_equals($password, $passwordConfirm)) {
-            redirect(base_url('route=register&error=' . urlencode('As senhas não conferem.')));
+            redirect(base_url($returnRoute . '&error=' . urlencode('As senhas não conferem.')));
         }
 
         if ($acceptLegal !== '1') {
-            redirect(base_url('route=register&error=' . urlencode('Você precisa aceitar os Termos de Uso e a Política de Privacidade.')));
+            redirect(base_url($returnRoute . '&error=' . urlencode('Você precisa aceitar os Termos de Uso e a Política de Privacidade.')));
         }
 
         try {
@@ -89,7 +128,7 @@ final class AuthController
                 'cpf' => $cpf,
             ]);
             if ($exists->fetch()) {
-                redirect(base_url('route=register&error=' . urlencode('Já existe uma conta com este e-mail ou CPF.')));
+                redirect(base_url($returnRoute . '&error=' . urlencode('Já existe uma conta com este e-mail ou CPF.')));
             }
 
             $hash = password_hash($password, PASSWORD_DEFAULT);
@@ -174,10 +213,39 @@ final class AuthController
             if (isset($db) && $db instanceof PDO && $db->inTransaction()) {
                 $db->rollBack();
             }
-            redirect(base_url('route=register&error=' . urlencode('Não foi possível criar a conta agora. Tente novamente em instantes.')));
+            redirect(base_url($returnRoute . '&error=' . urlencode('Não foi possível criar a conta agora. Tente novamente em instantes.')));
         }
 
+        $this->clearPostPurchaseRegistrationAccess();
+
         redirect(base_url('route=login&error=' . urlencode('Conta criada com sucesso! Faça login.')));
+    }
+
+    private function grantPostPurchaseRegistrationAccess(string $email = ''): void
+    {
+        $_SESSION['post_purchase_register_allowed_at'] = time();
+        $_SESSION['post_purchase_register_allowed'] = true;
+        if ($email !== '') {
+            $_SESSION['post_purchase_register_email'] = $email;
+        }
+    }
+
+    private function hasPostPurchaseRegistrationAccess(): bool
+    {
+        $allowed = (bool) ($_SESSION['post_purchase_register_allowed'] ?? false);
+        $allowedAt = (int) ($_SESSION['post_purchase_register_allowed_at'] ?? 0);
+        if (!$allowed || $allowedAt <= 0) {
+            return false;
+        }
+
+        return (time() - $allowedAt) <= self::POST_PURCHASE_REGISTER_WINDOW_SECONDS;
+    }
+
+    private function clearPostPurchaseRegistrationAccess(): void
+    {
+        unset($_SESSION['post_purchase_register_allowed']);
+        unset($_SESSION['post_purchase_register_allowed_at']);
+        unset($_SESSION['post_purchase_register_email']);
     }
 
     public function login(): void

@@ -23,12 +23,6 @@
     <div style="margin-top:10px; text-align:right;">
         <a href="<?= e(base_url('route=forgot_password')) ?>" class="muted" style="font-size:12px; text-decoration:none;">Esqueci minha senha</a>
     </div>
-
-    <div style="margin-top:8px; text-align:right;">
-        <a href="<?= e(base_url('route=register')) ?>" class="muted" style="font-size:12px; text-decoration:none;">Não tenho conta, cadastrar clínica</a>
-    </div>
-
-    <p class="muted" style="margin-top:12px;">Primeiro acesso? Cadastre a clínica para criar o ambiente.</p>
 </div>
 </div>
 

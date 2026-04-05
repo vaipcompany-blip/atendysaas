@@ -13,6 +13,10 @@
     <?php
     $legalVersions = $legalVersions ?? ['terms_version' => 'v1.0', 'privacy_version' => 'v1.0'];
     $legalLinks = $legalLinks ?? ['terms_url' => base_url('route=legal&doc=terms'), 'privacy_url' => base_url('route=legal&doc=privacy')];
+    $prefillEmail = mb_strtolower(trim((string) ($_GET['email'] ?? '')), 'UTF-8');
+    if ($prefillEmail !== '' && !filter_var($prefillEmail, FILTER_VALIDATE_EMAIL)) {
+        $prefillEmail = '';
+    }
     ?>
 
     <form method="post" action="<?= e(base_url('route=register')) ?>" class="form-grid">
@@ -25,7 +29,7 @@
 
         <div class="field">
             <label>E-mail *</label>
-            <input type="email" name="email" required maxlength="150" placeholder="voce@clinica.com">
+            <input type="email" name="email" required maxlength="150" placeholder="voce@clinica.com" value="<?= e($prefillEmail) ?>">
         </div>
 
         <div class="field">
