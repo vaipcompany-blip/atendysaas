@@ -174,8 +174,48 @@ final class KirvanoWebhookController
                 $mailer = new MailerService();
                 if ($mailer->isEnabled()) {
                     $appUrl  = rtrim((string) env('APP_URL', ''), '/');
-                    $subject = 'Bem-vindo ao Atendy — seus dados de acesso';
-                    $html    = '
+                    $loginUrl = $appUrl . '/?route=login';
+                    $subject = 'Bem-vindo ao Atendy - seus dados de acesso';
+                    $planLabel = match ($planType) {
+                        'annual' => 'Anual',
+                        'quarterly' => 'Trimestral',
+                        default => 'Mensal',
+                    };
+
+                    $brevoSent = false;
+                    if ($mailer->isBrevoTemplateEnabled()) {
+                        $templateId = (int) env('BREVO_TEMPLATE_ID', '0');
+                        $brevoResult = $mailer->sendBrevoTemplate($email, $templateId, [
+                            'nome' => $name !== '' ? $name : 'Cliente',
+                            'url_acesso' => $loginUrl,
+                            'usuario' => $email,
+                            'senha' => $plainPassword,
+                            'plano' => $planLabel,
+                            'suporte_email' => (string) env('MAIL_FROM_ADDRESS', 'suporte@atendy.com'),
+                            'whatsapp_suporte' => (string) env('SUPPORT_WHATSAPP', ''),
+                            'ano' => date('Y'),
+                        ]);
+
+                        if (($brevoResult['success'] ?? false) === true) {
+                            $brevoSent = true;
+                        } else {
+                            AppLogger::error('Kirvano webhook: Brevo template send failed', [
+                                'user_id' => $userId,
+                                'email' => $email,
+                                'error' => (string) ($brevoResult['error'] ?? 'unknown error'),
+                            ]);
+                        }
+                    }
+
+                    if ($brevoSent) {
+                        AppLogger::info('Kirvano webhook: welcome email sent via Brevo template', [
+                            'user_id' => $userId,
+                            'email' => $email,
+                        ]);
+                    }
+
+                    if (!$brevoSent) {
+                        $html = '
 <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;border:1px solid #e2e8f0;border-radius:12px">
   <h2 style="color:#0f766e;margin-top:0">Bem-vindo ao Atendy! 🎉</h2>
   <p>Sua compra foi aprovada. Sua conta já está ativa.</p>
@@ -185,15 +225,16 @@ final class KirvanoWebhookController
     <tr><td style="padding:8px;background:#f8fafc;border-radius:6px 0 0 6px;font-weight:bold">Senha</td>
         <td style="padding:8px;background:#f8fafc;border-radius:0 6px 6px 0;font-family:monospace">' . htmlspecialchars($plainPassword, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td></tr>
   </table>
-  <p style="margin:20px 0">
-    <a href="' . htmlspecialchars($appUrl . '/?route=login', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '"
+    <p style="margin:20px 0">
+        <a href="' . htmlspecialchars($loginUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '"
        style="background:#0f766e;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">
       Acessar o Atendy
     </a>
   </p>
   <p style="font-size:13px;color:#64748b">Recomendamos trocar a senha após o primeiro acesso em Configurações → Segurança.</p>
 </div>';
-                    $mailer->send($email, $subject, $html);
+                        $mailer->send($email, $subject, $html);
+                    }
                 }
             } catch (Throwable $e) {
                 AppLogger::error('Kirvano webhook: welcome email failed', [

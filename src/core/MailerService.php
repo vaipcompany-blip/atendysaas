@@ -8,7 +8,97 @@ final class MailerService
     {
         $host = trim((string) env('MAIL_HOST', ''));
         $from = trim((string) env('MAIL_FROM_ADDRESS', ''));
-        return $host !== '' && $from !== '';
+        $hasSmtp = $host !== '' && $from !== '';
+
+        $brevoApiKey = trim((string) env('BREVO_API_KEY', ''));
+        $brevoTemplateId = (int) env('BREVO_TEMPLATE_ID', '0');
+        $hasBrevoTemplate = $brevoApiKey !== '' && $brevoTemplateId > 0;
+
+        return $hasSmtp || $hasBrevoTemplate;
+    }
+
+    public function isBrevoTemplateEnabled(): bool
+    {
+        $brevoApiKey = trim((string) env('BREVO_API_KEY', ''));
+        $brevoTemplateId = (int) env('BREVO_TEMPLATE_ID', '0');
+        return $brevoApiKey !== '' && $brevoTemplateId > 0;
+    }
+
+    public function sendBrevoTemplate(string $toEmail, int $templateId, array $params = [], ?string $subject = null): array
+    {
+        $apiKey = trim((string) env('BREVO_API_KEY', ''));
+        if ($apiKey === '' || $templateId <= 0) {
+            return ['success' => false, 'error' => 'Brevo template não configurado'];
+        }
+
+        if (!function_exists('curl_init')) {
+            return ['success' => false, 'error' => 'cURL indisponível no servidor'];
+        }
+
+        $fromAddress = trim((string) env('MAIL_FROM_ADDRESS', ''));
+        $fromName = trim((string) env('MAIL_FROM_NAME', env('APP_NAME', 'Atendy') ?? 'Atendy'));
+
+        $payload = [
+            'to' => [
+                ['email' => $toEmail],
+            ],
+            'templateId' => $templateId,
+            'params' => $params,
+        ];
+
+        if ($subject !== null && trim($subject) !== '') {
+            $payload['subject'] = trim($subject);
+        }
+
+        if ($fromAddress !== '') {
+            $payload['sender'] = [
+                'email' => $fromAddress,
+                'name' => $fromName !== '' ? $fromName : 'Atendy',
+            ];
+        }
+
+        $ch = curl_init('https://api.brevo.com/v3/smtp/email');
+        if ($ch === false) {
+            return ['success' => false, 'error' => 'Falha ao inicializar cURL'];
+        }
+
+        $body = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($body === false) {
+            curl_close($ch);
+            return ['success' => false, 'error' => 'Falha ao serializar payload do Brevo'];
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [
+                'accept: application/json',
+                'content-type: application/json',
+                'api-key: ' . $apiKey,
+            ],
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 20,
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($response === false) {
+            return ['success' => false, 'error' => 'Erro cURL no Brevo: ' . $curlError];
+        }
+
+        if ($httpCode < 200 || $httpCode >= 300) {
+            return [
+                'success' => false,
+                'error' => 'Brevo retornou HTTP ' . $httpCode,
+                'response' => $response,
+            ];
+        }
+
+        return ['success' => true, 'response' => $response];
     }
 
     public function send(string $toEmail, string $subject, string $htmlBody, string $textBody = ''): array
