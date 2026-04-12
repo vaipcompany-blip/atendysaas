@@ -65,13 +65,12 @@ final class KirvanoWebhookController
         $stmt->execute(['email' => $email]);
         $existingUser = $stmt->fetch();
 
-        $isNewUser     = false;
-        $plainPassword = '';
+        $isNewUser = false;
 
         if (!$existingUser) {
-            $isNewUser     = true;
-            $plainPassword = $this->generatePassword();
-            $hash          = password_hash($plainPassword, PASSWORD_DEFAULT);
+            $isNewUser = true;
+            $temporaryPassword = $this->generatePassword();
+            $hash = password_hash($temporaryPassword, PASSWORD_DEFAULT);
 
             $nomeConsultorio = $name !== '' ? $name : 'Meu Consultório';
             $cpfPlaceholder  = '00000000000';
@@ -168,14 +167,15 @@ final class KirvanoWebhookController
             return;
         }
 
-        // Send welcome email with credentials (new users only)
-        if ($isNewUser && $plainPassword !== '') {
+        // Send welcome email with password setup link (new users only)
+        if ($isNewUser) {
             try {
                 $mailer = new MailerService();
                 if ($mailer->isEnabled()) {
                     $appUrl  = rtrim((string) env('APP_URL', ''), '/');
                     $loginUrl = $appUrl . '/?route=login';
-                    $subject = 'Bem-vindo ao Atendy - seus dados de acesso';
+                    $resetUrl = $this->createPasswordResetLink((int) $userId);
+                    $subject = 'Bem-vindo ao Atendy - defina sua senha';
                     $planLabel = match ($planType) {
                         'annual' => 'Anual',
                         'quarterly' => 'Trimestral',
@@ -189,7 +189,8 @@ final class KirvanoWebhookController
                             'nome' => $name !== '' ? $name : 'Cliente',
                             'url_acesso' => $loginUrl,
                             'usuario' => $email,
-                            'senha' => $plainPassword,
+                            'url_criar_senha' => $resetUrl,
+                            'senha' => '',
                             'plano' => $planLabel,
                             'suporte_email' => (string) env('MAIL_FROM_ADDRESS', 'suporte@atendy.com'),
                             'whatsapp_suporte' => (string) env('SUPPORT_WHATSAPP', ''),
@@ -218,20 +219,20 @@ final class KirvanoWebhookController
                         $html = '
 <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;border:1px solid #e2e8f0;border-radius:12px">
   <h2 style="color:#0f766e;margin-top:0">Bem-vindo ao Atendy! 🎉</h2>
-  <p>Sua compra foi aprovada. Sua conta já está ativa.</p>
+    <p>Sua compra foi aprovada. Sua conta foi criada com sucesso.</p>
   <table style="width:100%;border-collapse:collapse;margin:16px 0">
     <tr><td style="padding:8px;background:#f0fdf4;border-radius:6px 0 0 6px;font-weight:bold;width:120px">Login</td>
         <td style="padding:8px;background:#f0fdf4;border-radius:0 6px 6px 0">' . htmlspecialchars($email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td></tr>
-    <tr><td style="padding:8px;background:#f8fafc;border-radius:6px 0 0 6px;font-weight:bold">Senha</td>
-        <td style="padding:8px;background:#f8fafc;border-radius:0 6px 6px 0;font-family:monospace">' . htmlspecialchars($plainPassword, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td></tr>
+        <tr><td style="padding:8px;background:#f8fafc;border-radius:6px 0 0 6px;font-weight:bold">Acesso</td>
+                <td style="padding:8px;background:#f8fafc;border-radius:0 6px 6px 0">Defina sua senha pelo link abaixo</td></tr>
   </table>
     <p style="margin:20px 0">
-        <a href="' . htmlspecialchars($loginUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '"
+                <a href="' . htmlspecialchars($resetUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '"
        style="background:#0f766e;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">
-      Acessar o Atendy
+            Criar senha e acessar o Atendy
     </a>
   </p>
-  <p style="font-size:13px;color:#64748b">Recomendamos trocar a senha após o primeiro acesso em Configurações → Segurança.</p>
+    <p style="font-size:13px;color:#64748b">Esse link é válido por 30 minutos. Depois disso, use "Esqueci minha senha" na tela de login.</p>
 </div>';
                         $mailer->send($email, $subject, $html);
                     }
@@ -265,5 +266,35 @@ final class KirvanoWebhookController
             $password .= $chars[random_int(0, strlen($chars) - 1)];
         }
         return $password;
+    }
+
+    private function createPasswordResetLink(int $userId): string
+    {
+        $db = Database::connection();
+        $tokenPlain = $this->generateToken();
+        $tokenHash = password_hash($tokenPlain, PASSWORD_DEFAULT);
+
+        $cleanup = $db->prepare('DELETE FROM password_resets WHERE user_id = :user_id OR expires_at < NOW() OR used_at IS NOT NULL');
+        $cleanup->execute(['user_id' => $userId]);
+
+        $insert = $db->prepare(
+            'INSERT INTO password_resets (user_id, token_hash, expires_at, created_at)
+             VALUES (:user_id, :token_hash, DATE_ADD(NOW(), INTERVAL 30 MINUTE), NOW())'
+        );
+        $insert->execute([
+            'user_id' => $userId,
+            'token_hash' => $tokenHash,
+        ]);
+
+        return base_url('route=reset_password&token=' . urlencode($tokenPlain));
+    }
+
+    private function generateToken(): string
+    {
+        try {
+            return bin2hex(random_bytes(24));
+        } catch (Throwable $e) {
+            return sha1((string) microtime(true) . (string) mt_rand());
+        }
     }
 }
