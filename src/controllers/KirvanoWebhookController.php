@@ -42,6 +42,7 @@ final class KirvanoWebhookController
         $email    = mb_strtolower(trim((string) ($customer['email'] ?? '')), 'UTF-8');
         $name     = trim((string) ($customer['name'] ?? ''));
         $phone    = preg_replace('/\D+/', '', (string) ($customer['phone_number'] ?? ''));
+        $document = preg_replace('/\D+/', '', (string) ($customer['document'] ?? ''));
 
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             AppLogger::error('Kirvano webhook: invalid customer email', ['payload_event' => $event]);
@@ -73,7 +74,7 @@ final class KirvanoWebhookController
             $hash = password_hash($temporaryPassword, PASSWORD_DEFAULT);
 
             $nomeConsultorio = $name !== '' ? $name : 'Meu Consultório';
-            $cpfPlaceholder  = '00000000000';
+            $cpfValue = $this->resolveCpfValue($document, $email);
             $phoneNormalized = ($phone !== '' && strlen($phone) >= 10) ? $phone : '00000000000';
 
             $db->beginTransaction();
@@ -84,7 +85,7 @@ final class KirvanoWebhookController
                 );
                 $insertUser->execute([
                     'email'           => $email,
-                    'cpf'             => $cpfPlaceholder,
+                    'cpf'             => $cpfValue,
                     'password_hash'   => $hash,
                     'nome_consultorio' => $nomeConsultorio,
                     'telefone'        => $phoneNormalized,
@@ -296,5 +297,18 @@ final class KirvanoWebhookController
         } catch (Throwable $e) {
             return sha1((string) microtime(true) . (string) mt_rand());
         }
+    }
+
+    private function resolveCpfValue(string $document, string $email): string
+    {
+        if (strlen($document) === 11) {
+            return $document;
+        }
+
+        // Keep a deterministic 11-digit fallback for accounts created without CPF in the payload.
+        $digits = preg_replace('/\D+/', '', (string) crc32($email) . (string) time());
+        $digits = str_pad(substr($digits, 0, 11), 11, '0');
+
+        return $digits;
     }
 }
