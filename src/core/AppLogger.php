@@ -87,13 +87,18 @@ final class AppLogger
             'context' => $context,
         ];
 
+        $encoded = json_encode($line, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        // Grava no stdout para aparecer nos logs do Railway
+        error_log($encoded);
+
         $logFile = self::logFilePath();
         $logDir = dirname($logFile);
         if (!is_dir($logDir)) {
             mkdir($logDir, 0755, true);
         }
 
-        file_put_contents($logFile, json_encode($line, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL, FILE_APPEND | LOCK_EX);
+        file_put_contents($logFile, $encoded . PHP_EOL, FILE_APPEND | LOCK_EX);
         self::rotateIfNeeded($logFile);
     }
 
