@@ -16,6 +16,9 @@ $normalizedPath = $requestUriPath;
 if ($scriptDir !== '' && strpos($normalizedPath, $scriptDir . '/') === 0) {
     $normalizedPath = substr($normalizedPath, strlen($scriptDir));
 }
+if ($scriptName !== '' && strpos($normalizedPath, $scriptName) === 0) {
+    $normalizedPath = substr($normalizedPath, strlen($scriptName));
+}
 if ($normalizedPath === '') {
     $normalizedPath = '/';
 }
