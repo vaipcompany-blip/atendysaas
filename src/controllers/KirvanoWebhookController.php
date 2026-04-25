@@ -7,6 +7,7 @@ final class KirvanoWebhookController
     public function handle(): void
     {
         $rawBody = (string) file_get_contents('php://input');
+        AppLogger::info('Kirvano webhook payload recebido', ['body' => $rawBody]);
 
         $payload = json_decode($rawBody, true);
         if (!is_array($payload)) {
